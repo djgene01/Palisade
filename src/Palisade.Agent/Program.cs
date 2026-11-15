@@ -37,6 +37,7 @@ await engine.InitializeAsync();
 app.MapGet("/status", (CancellationToken ct) => engine.GetStatusAsync(ct));
 app.MapGet("/config", (CancellationToken ct) => engine.GetConfigAsync(ct));
 app.MapGet("/leases", (CancellationToken ct) => engine.GetLeasesAsync(ct));
+app.MapGet("/usage", (CancellationToken ct) => engine.GetUsageAsync(ct));
 app.MapPost("/config/apply", (FirewallConfig config, CancellationToken ct) => engine.ApplyAsync(config, ct));
 app.MapPost("/config/confirm", async (CancellationToken ct) => { await engine.ConfirmAsync(ct); return Results.NoContent(); });
 app.MapPost("/config/revert", async (CancellationToken ct) => { await engine.RevertAsync(ct); return Results.NoContent(); });
@@ -49,5 +50,8 @@ app.Lifetime.ApplicationStarted.Register(() =>
     chgrp?.WaitForExit();
     File.SetUnixFileMode(socketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
 });
+
+if (app.Services.GetRequiredService<ISystemPlatform>() is LinuxPlatform linux)
+    _ = linux.WatchUsageAsync(app.Lifetime.ApplicationStopping);
 
 app.Run();

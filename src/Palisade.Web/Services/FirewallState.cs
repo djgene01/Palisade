@@ -23,6 +23,7 @@ public sealed class FirewallState(IFirewallBackend backend)
     public FirewallConfig? Config { get; private set; }
     public SystemStatus? Status { get; private set; }
     public IReadOnlyList<DhcpLease> Leases { get; private set; } = [];
+    public UsageReport? Usage { get; private set; }
     public string? Error { get; private set; }
 
     public event Action? Changed;
@@ -51,6 +52,7 @@ public sealed class FirewallState(IFirewallBackend backend)
         {
             Status = await backend.GetStatusAsync();
             Leases = await backend.GetLeasesAsync();
+            Usage = await backend.GetUsageAsync();
             Error = null;
         }
         catch (Exception ex)
@@ -124,6 +126,14 @@ public static class Fmt
             : bits >= 1_000 ? $"{(bits / 1_000).ToString("0", CultureInfo.InvariantCulture)} kbit/s"
             : $"{bits.ToString("0", CultureInfo.InvariantCulture)} bit/s";
     }
+
+    public static string Bytes(long bytes) => bytes switch
+    {
+        >= 1_000_000_000 => $"{(bytes / 1e9).ToString("0.0", CultureInfo.InvariantCulture)} GB",
+        >= 1_000_000 => $"{(bytes / 1e6).ToString(bytes >= 100_000_000 ? "0" : "0.0", CultureInfo.InvariantCulture)} MB",
+        >= 1_000 => $"{(bytes / 1e3).ToString("0", CultureInfo.InvariantCulture)} kB",
+        _ => $"{bytes.ToString(CultureInfo.InvariantCulture)} bytes",
+    };
 
     public static string Uptime(long seconds)
     {

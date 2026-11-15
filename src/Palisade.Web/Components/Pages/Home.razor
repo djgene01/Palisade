@@ -103,7 +103,87 @@
     </section>
 </div>
 
+@{
+    var usage = Ranked();
+    var top = usage.Take(8).ToList();
+    var scale = Math.Max(1, top.Select(u => Math.Max(Measure(u, down: true), Measure(u, down: false))).DefaultIfEmpty(1).Max());
+}
+<section aria-labelledby="usage-title" class="mt-10">
+    <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div>
+            <h2 id="usage-title" class="text-xl font-bold">Who is using the internet</h2>
+            <p class="field-hint">@(_byRate ? "Ordered by speed over the last few seconds." : $"Ordered by total use {SinceText()}.")</p>
+        </div>
+        <div role="group" aria-label="Order the list by" class="flex gap-1">
+            <button type="button" class="btn @(_byRate ? "" : "border-pine bg-pine-soft")" aria-pressed="@(_byRate ? "false" : "true")" @onclick="() => _byRate = false">Total</button>
+            <button type="button" class="btn @(_byRate ? "border-pine bg-pine-soft" : "")" aria-pressed="@(_byRate ? "true" : "false")" @onclick="() => _byRate = true">Right now</button>
+        </div>
+    </div>
+
+    @if (State.Usage is null)
+    {
+        <p class="mt-3 text-muted" role="status">Measuring.</p>
+    }
+    else if (top.Count == 0)
+    {
+        <p class="panel mt-3 p-4 text-muted">@(_byRate ? "No device is using the internet at this moment." : $"No device has used the internet {SinceText()}.")</p>
+    }
+    else
+    {
+        <ol class="panel mt-3 divide-y divide-line">
+            @foreach (var u in top)
+            {
+                var device = devices.FirstOrDefault(d => d.Address == u.Address);
+                var down = Measure(u, down: true);
+                var up = Measure(u, down: false);
+                <li class="grid items-center gap-x-5 gap-y-2 p-4 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]">
+                    <div class="min-w-0">
+                        <p class="truncate font-bold">@(device?.Name ?? "Unknown device")</p>
+                        <p class="text-sm text-muted">@u.Address</p>
+                    </div>
+                    <div aria-hidden="true" class="space-y-1">
+                        <div class="h-2.5 rounded-sm bg-pine" style="width: @Width(down, scale)"></div>
+                        <div class="h-1.5 rounded-sm bg-ochre" style="width: @Width(up, scale)"></div>
+                    </div>
+                    <p class="whitespace-nowrap text-sm sm:text-right">
+                        <span class="block"><span class="font-bold">@Show(down)</span> <span class="text-muted">coming in</span></span>
+                        <span class="block"><span class="font-bold">@Show(up)</span> <span class="text-muted">going out</span></span>
+                    </p>
+                </li>
+            }
+        </ol>
+        @if (usage.Count > top.Count)
+        {
+            <p class="mt-2 text-sm text-muted">And @Fmt.Plural(usage.Count - top.Count, "more device", "more devices") using less than these.</p>
+        }
+    }
+    <p class="mt-2 text-sm text-muted">Counts traffic between your devices and the internet. Totals start again from zero if the firewall restarts.</p>
+</section>
+
 @code {
+    private bool _byRate;
+
+    private double Measure(DeviceUsage u, bool down) => _byRate ? (down ? u.DownRate : u.UpRate) : (down ? u.DownBytes : u.UpBytes);
+
+    private List<DeviceUsage> Ranked() => (State.Usage?.Devices ?? [])
+        .Where(u => Measure(u, true) + Measure(u, false) > 0)
+        .OrderByDescending(u => Measure(u, true) + Measure(u, false))
+        .ToList();
+
+    private string Show(double value) => _byRate ? Fmt.Rate(value) : Fmt.Bytes((long)value);
+
+    // A sliver stays visible for anything above zero, so a quiet device is not mistaken for a silent one.
+    private static string Width(double value, double scale) =>
+        value <= 0 ? "0" : string.Create(CultureInfo.InvariantCulture, $"{Math.Max(1.5, value / scale * 100):0.#}%");
+
+    private string SinceText()
+    {
+        if (State.Usage is not { } report) return "";
+        if (DateTimeOffset.UtcNow - report.Since > TimeSpan.FromHours(23.9)) return "over the last 24 hours";
+        var since = report.Since.ToLocalTime();
+        return $"since {since.ToString("HH:mm", CultureInfo.InvariantCulture)}{(since.Date == DateTimeOffset.Now.Date ? "" : " yesterday")}";
+    }
+
     private readonly List<(double Down, double Up)> _samples = [];
     private (long Rx, long Tx, DateTimeOffset At)? _last;
     private double _downRate, _upRate;

@@ -40,6 +40,9 @@ public sealed class AgentClient : IFirewallBackend, IDisposable
     public async Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct = default) =>
         (await _http.GetFromJsonAsync<List<DhcpLease>>("leases", PalisadeJson.Options, ct))!;
 
+    public async Task<UsageReport> GetUsageAsync(CancellationToken ct = default) =>
+        (await _http.GetFromJsonAsync<UsageReport>("usage", PalisadeJson.Options, ct))!;
+
     public async Task<ApplyResult> ApplyAsync(FirewallConfig config, CancellationToken ct = default)
     {
         using var response = await _http.PostAsJsonAsync("config/apply", config, PalisadeJson.Options, ct);
@@ -67,6 +70,9 @@ public sealed class SimulatedPlatform : ISystemPlatform
     private DateTimeOffset _lastSample = DateTimeOffset.UtcNow;
     private long _rx = 48_000_000, _tx = 9_000_000;
     private FirewallConfig? _applied;
+    private readonly UsageTracker _usage = new(DateTimeOffset.UtcNow);
+    private readonly Dictionary<string, (long Down, long Up)> _counters = [];
+    private DateTimeOffset _usageAt = DateTimeOffset.UtcNow;
 
     public Task<IReadOnlyList<string>> CheckAsync(FirewallConfig config, GeneratedFiles files, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<string>>([]);
@@ -106,6 +112,25 @@ public sealed class SimulatedPlatform : ISystemPlatform
                 new("enp2s0", "52:54:00:00:00:02", true, lanAddresses, _tx, _rx),
             ],
         });
+    }
+
+    public async Task<UsageReport> GetUsageAsync(CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seconds = (now - _usageAt).TotalSeconds;
+        if (seconds < 1.5) return _usage.Report(now);
+        _usageAt = now;
+        // Each pretend device has its own appetite, so the list has a clear order to look at.
+        var leases = await GetLeasesAsync(ct);
+        for (var i = 0; i < leases.Count; i++)
+        {
+            var before = _counters.GetValueOrDefault(leases[i].Address);
+            var busy = i == 2 || _random.Next(4) > 0;
+            var down = busy ? (long)(seconds * _random.Next(20_000, 400_000) * (i == 2 ? 6 : 1.0 / (i + 1))) : 0;
+            _counters[leases[i].Address] = (before.Down + down, before.Up + down / _random.Next(8, 30));
+        }
+        _usage.Record(now, new Dictionary<string, (long, long)>(_counters));
+        return _usage.Report(now);
     }
 
     public Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct)

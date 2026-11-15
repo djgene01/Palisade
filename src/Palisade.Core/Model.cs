@@ -117,6 +117,7 @@ public interface IFirewallBackend
     Task ConfirmAsync(CancellationToken ct = default);
     Task RevertAsync(CancellationToken ct = default);
     Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct = default);
+    Task<UsageReport> GetUsageAsync(CancellationToken ct = default);
 }
 
 public static class NewId

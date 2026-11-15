@@ -16,6 +16,8 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     private const string LeaseFile = "/var/lib/misc/dnsmasq.leases";
     private const string DnsInstanceDirectory = "/etc/palisade/dns";
 
+    private readonly UsageTracker _usage = new(DateTimeOffset.UtcNow);
+    private readonly SemaphoreSlim _usageGate = new(1, 1);
     private DateTimeOffset _internetCheckedAt;
     private bool _internetReachable;
 
@@ -144,6 +146,40 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         if (!File.Exists(LeaseFile)) return [];
         var now = DateTimeOffset.UtcNow;
         return LeaseParser.Parse(await File.ReadAllTextAsync(LeaseFile, ct)).Where(l => l.Expires > now).ToList();
+    }
+
+    /// <summary>Keeps the totals growing while nobody has the overview open. Started once by the host.</summary>
+    public async Task WatchUsageAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        try
+        {
+            do { await GetUsageAsync(ct); }
+            while (await timer.WaitForNextTickAsync(ct));
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    public async Task<UsageReport> GetUsageAsync(CancellationToken ct)
+    {
+        await _usageGate.WaitAsync(ct);
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            // The overview asks every two seconds, possibly from several browsers. Reading more often than
+            // that gains nothing and would make the speeds jumpy.
+            if (now - _usage.LastSampleAt >= TimeSpan.FromSeconds(1.5))
+            {
+                var received = await RunAsync("nft", ["-j", "list", "set", "inet", ConfigRenderer.UsageTable, ConfigRenderer.UsageDownSet], ct);
+                var sent = await RunAsync("nft", ["-j", "list", "set", "inet", ConfigRenderer.UsageTable, ConfigRenderer.UsageUpSet], ct);
+                // Before first setup the table does not exist yet; an empty reading is the truth then.
+                var down = received.ExitCode == 0 ? UsageParser.ParseSet(received.Output) : [];
+                var up = sent.ExitCode == 0 ? UsageParser.ParseSet(sent.Output) : [];
+                _usage.Record(now, down.Keys.Union(up.Keys).ToDictionary(a => a, a => (down.GetValueOrDefault(a), up.GetValueOrDefault(a))));
+            }
+            return _usage.Report(now);
+        }
+        finally { _usageGate.Release(); }
     }
 
     private async Task<bool> CheckInternetAsync(FirewallConfig active, CancellationToken ct)

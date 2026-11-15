@@ -302,6 +302,74 @@ public class CoreTests
     }
 
     [Fact]
+    public void Usage_is_counted_per_home_address_without_deciding_anything()
+    {
+        var text = ConfigRenderer.Nftables(Sample());
+
+        Assert.Contains("table inet palisade_usage {", text);
+        Assert.Contains("type filter hook forward priority -10; policy accept;", text);
+        Assert.Contains("iifname \"enp2s0\" oifname \"enp1s0\" ip saddr 192.168.50.0/24 update @sent { ip saddr }", text);
+        Assert.Contains("iifname \"enp1s0\" oifname \"enp2s0\" ip daddr 192.168.50.0/24 update @received { ip daddr }", text);
+        var usage = text[text.IndexOf("table inet palisade_usage", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("drop", usage);
+        Assert.DoesNotContain("reject", usage);
+    }
+
+    [Fact]
+    public void Usage_tracker_survives_counter_resets_and_forgets_old_hours()
+    {
+        var start = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
+        var tracker = new UsageTracker(start);
+        static Dictionary<string, (long, long)> At(long down, long up) => new() { ["192.168.50.20"] = (down, up) };
+
+        // Whatever was counted before the first reading is of unknown age and is left out.
+        tracker.Record(start, At(5_000_000, 1_000_000));
+        Assert.Empty(tracker.Report(start).Devices);
+
+        tracker.Record(start.AddSeconds(10), At(5_100_000, 1_020_000));
+        var device = Assert.Single(tracker.Report(start.AddSeconds(10)).Devices);
+        Assert.Equal((100_000, 20_000), (device.DownBytes, device.UpBytes));
+        Assert.Equal(10_000, device.DownRate, 3);
+        Assert.Equal(2_000, device.UpRate, 3);
+
+        // The rules were reloaded: the kernel counts from zero again, and nothing may go negative or be lost.
+        tracker.Record(start.AddSeconds(20), At(30_000, 0));
+        device = Assert.Single(tracker.Report(start.AddSeconds(20)).Devices);
+        Assert.Equal((130_000, 20_000), (device.DownBytes, device.UpBytes));
+
+        // A second device that appears later is counted from its first byte, and the busiest is listed first.
+        var both = At(30_000, 0);
+        both["192.168.50.21"] = (900_000, 5);
+        tracker.Record(start.AddSeconds(30), both);
+        var report = tracker.Report(start.AddSeconds(30));
+        Assert.Equal(["192.168.50.21", "192.168.50.20"], report.Devices.Select(d => d.Address));
+        Assert.Equal(start, report.Since);
+        Assert.Equal(0, report.Devices[1].DownRate);
+
+        // A day later the old hours have dropped out of the total.
+        var later = start.AddHours(25);
+        tracker.Record(later, new Dictionary<string, (long, long)>());
+        Assert.Empty(tracker.Report(later).Devices);
+        Assert.Equal(later.AddHours(-24), tracker.Report(later).Since);
+    }
+
+    [Fact]
+    public void Usage_counters_are_read_from_nft_json()
+    {
+        const string json = """
+            {"nftables": [{"metainfo": {"version": "1.1.3"}}, {"set": {"family": "inet", "name": "received", "table": "palisade_usage", "type": "ipv4_addr",
+            "elem": [{"elem": {"val": "192.168.88.156", "expires": 86399, "counter": {"packets": 5387, "bytes": 5871052}}}, "192.168.88.9",
+            {"elem": {"val": "not-an-address", "counter": {"packets": 1, "bytes": 1}}}], "stmt": [{"counter": null}]}}]}
+            """;
+
+        var parsed = UsageParser.ParseSet(json);
+        Assert.Equal(5871052, Assert.Single(parsed).Value);
+        Assert.Equal("192.168.88.156", parsed.Keys.Single());
+        Assert.Empty(UsageParser.ParseSet("Error: No such file or directory"));
+        Assert.Empty(UsageParser.ParseSet("{\"nftables\": [{\"set\": {\"name\": \"sent\"}}]}"));
+    }
+
+    [Fact]
     public void Lease_file_is_parsed()
     {
         var leases = LeaseParser.Parse("1800000000 aa:bb:cc:dd:ee:01 192.168.50.101 laptop 01:aa:bb:cc:dd:ee:01\n1800000100 AA:BB:CC:DD:EE:02 192.168.50.102 * *\ngarbage\n");
@@ -342,6 +410,7 @@ public class EngineTests
 
         public Task<SystemStatus> GetStatusAsync(FirewallConfig active, CancellationToken ct) => Task.FromResult(new SystemStatus());
         public Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<DhcpLease>>([]);
+        public Task<UsageReport> GetUsageAsync(CancellationToken ct) => Task.FromResult(new UsageReport());
     }
 
     private static FirewallConfig Config(string lan = "192.168.50.1") => new() { WanInterface = "wan0", LanInterface = "lan0", LanAddress = lan };

@@ -12,6 +12,8 @@ public interface ISystemPlatform
     Task ClearAsync(CancellationToken ct);
     Task<SystemStatus> GetStatusAsync(FirewallConfig active, CancellationToken ct);
     Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct);
+    /// <summary>Internet use per home-network address over the last 24 hours, busiest first.</summary>
+    Task<UsageReport> GetUsageAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -74,6 +76,8 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
     }
 
     public Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct = default) => platform.GetLeasesAsync(ct);
+
+    public Task<UsageReport> GetUsageAsync(CancellationToken ct = default) => platform.GetUsageAsync(ct);
 
     public async Task<ApplyResult> ApplyAsync(FirewallConfig config, CancellationToken ct = default)
     {
