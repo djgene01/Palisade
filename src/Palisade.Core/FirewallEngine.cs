@@ -14,6 +14,10 @@ public interface ISystemPlatform
     Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct);
     /// <summary>Internet use per home-network address over the last 24 hours, busiest first.</summary>
     Task<UsageReport> GetUsageAsync(CancellationToken ct);
+    /// <summary>Makes the pauses and schedules the ones the clock is checked against, starting now.</summary>
+    Task SetAccessAsync(IReadOnlyList<DeviceAccess> access, CancellationToken ct);
+    Task<WifiStatus> GetWifiAsync(CancellationToken ct);
+    Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct);
 }
 
 /// <summary>
@@ -79,17 +83,30 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
 
     public Task<UsageReport> GetUsageAsync(CancellationToken ct = default) => platform.GetUsageAsync(ct);
 
+    public Task<WifiStatus> GetWifiAsync(CancellationToken ct = default) => platform.GetWifiAsync(ct);
+
+    public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default)
+    {
+        var issues = WifiPlan.Validate(request);
+        return issues.Count > 0 ? Task.FromResult(ApplyResult.Failed(issues)) : platform.SetWifiAsync(request, ct);
+    }
+
     public async Task<ApplyResult> ApplyAsync(FirewallConfig config, CancellationToken ct = default)
     {
         config = config.Clone();
         config.SetupComplete = true;
-        var issues = ConfigValidator.Validate(config);
-        if (issues.Count > 0) return ApplyResult.Failed(issues);
-
-        var files = ConfigRenderer.Render(config);
         await _gate.WaitAsync(ct);
         try
         {
+            // Pauses and schedules have their own save path. A page that loaded its settings before a pause
+            // was pressed must not wipe that pause by saving something unrelated.
+            var current = (_pending ?? _active).Clone();
+            config.Access = current.Access;
+            config.Names = current.Names;
+            var issues = ConfigValidator.Validate(config);
+            if (issues.Count > 0) return ApplyResult.Failed(issues);
+            var files = ConfigRenderer.Render(config);
+
             var problems = await platform.CheckAsync(config, files, ct);
             if (problems.Count > 0) return ApplyResult.Failed(problems.Select(p => new ValidationIssue("", p)));
 
@@ -122,11 +139,58 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
             _active = _pending;
             _pending = null;
             _timer?.Cancel();
-            var temp = _configPath + ".tmp";
-            await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(_active, PalisadeJson.Options), ct);
-            File.Move(temp, _configPath, overwrite: true);
+            await SaveActiveAsync(ct);
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<ApplyResult> SetAccessAsync(List<DeviceAccess> access, CancellationToken ct = default)
+    {
+        var issues = AccessPlan.Validate(access);
+        if (issues.Count > 0) return ApplyResult.Failed(issues);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var copy = new FirewallConfig { Access = access }.Clone().Access;
+            _active.Access = copy;
+            if (_pending is not null) _pending.Access = new FirewallConfig { Access = access }.Clone().Access;
+            if (_active.SetupComplete) await SaveActiveAsync(ct);
+            await platform.SetAccessAsync(copy, ct);
+            return new ApplyResult { Ok = true };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log?.Invoke($"Saving pauses and schedules failed: {ex.Message}");
+            return ApplyResult.Failed($"The change could not be saved. ({ex.Message})");
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default)
+    {
+        var issues = DeviceName.Validate(names);
+        if (issues.Count > 0) return ApplyResult.Failed(issues);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            _active.Names = new FirewallConfig { Names = names }.Clone().Names;
+            if (_pending is not null) _pending.Names = new FirewallConfig { Names = names }.Clone().Names;
+            if (_active.SetupComplete) await SaveActiveAsync(ct);
+            return new ApplyResult { Ok = true };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log?.Invoke($"Saving device names failed: {ex.Message}");
+            return ApplyResult.Failed($"The name could not be saved. ({ex.Message})");
+        }
+        finally { _gate.Release(); }
+    }
+
+    private async Task SaveActiveAsync(CancellationToken ct)
+    {
+        var temp = _configPath + ".tmp";
+        await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(_active, PalisadeJson.Options), ct);
+        File.Move(temp, _configPath, overwrite: true);
     }
 
     public async Task RevertAsync(CancellationToken ct = default)

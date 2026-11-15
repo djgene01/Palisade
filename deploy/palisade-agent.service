@@ -13,6 +13,9 @@ RuntimeDirectoryMode=0755
 StateDirectory=palisade
 Environment=DOTNET_ENVIRONMENT=Production
 Restart=on-failure
+# The agent brings network ports up, which starts long-lived helpers (the DHCP client, the Wi-Fi client).
+# They must outlive a restart or upgrade of the agent, or the internet port loses its address.
+KillMode=process
 RestartSec=3
 
 [Install]

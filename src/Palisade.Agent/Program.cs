@@ -38,6 +38,10 @@ app.MapGet("/status", (CancellationToken ct) => engine.GetStatusAsync(ct));
 app.MapGet("/config", (CancellationToken ct) => engine.GetConfigAsync(ct));
 app.MapGet("/leases", (CancellationToken ct) => engine.GetLeasesAsync(ct));
 app.MapGet("/usage", (CancellationToken ct) => engine.GetUsageAsync(ct));
+app.MapPost("/access", (List<DeviceAccess> access, CancellationToken ct) => engine.SetAccessAsync(access, ct));
+app.MapGet("/wifi", (CancellationToken ct) => engine.GetWifiAsync(ct));
+app.MapPost("/wifi", (WifiRequest request, CancellationToken ct) => engine.SetWifiAsync(request, ct));
+app.MapPost("/names", (List<DeviceName> names, CancellationToken ct) => engine.SetNamesAsync(names, ct));
 app.MapPost("/config/apply", (FirewallConfig config, CancellationToken ct) => engine.ApplyAsync(config, ct));
 app.MapPost("/config/confirm", async (CancellationToken ct) => { await engine.ConfirmAsync(ct); return Results.NoContent(); });
 app.MapPost("/config/revert", async (CancellationToken ct) => { await engine.RevertAsync(ct); return Results.NoContent(); });
@@ -52,6 +56,9 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 if (app.Services.GetRequiredService<ISystemPlatform>() is LinuxPlatform linux)
+{
     _ = linux.WatchUsageAsync(app.Lifetime.ApplicationStopping);
+    _ = linux.WatchClockAsync(app.Lifetime.ApplicationStopping);
+}
 
 app.Run();

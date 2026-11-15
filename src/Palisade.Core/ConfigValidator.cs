@@ -39,6 +39,13 @@ public static partial class ConfigValidator
         if (c.WanInterface == c.LanInterface && c.WanInterface.Length > 0)
             Add("LanInterface", "The internet port and the home network port must be different.");
 
+        if (c.MaintenanceInterface.Length > 0)
+        {
+            if (!InterfaceName().IsMatch(c.MaintenanceInterface)) Add("MaintenanceInterface", "Choose a port for maintenance, or none.");
+            else if (c.MaintenanceInterface == c.WanInterface || c.MaintenanceInterface == c.LanInterface)
+                Add("MaintenanceInterface", "The maintenance port must be a different port from the internet port and the home network port.");
+        }
+
         var lanOk = Ip4.TryParse(c.LanAddress, out var lan);
         if (!lanOk || !lan.IsPrivate)
             Add("LanAddress", "The firewall's address must be a private address such as 192.168.50.1.");
@@ -147,6 +154,8 @@ public static partial class ConfigValidator
             if (!Enum.IsDefined(device.Level)) Add(field, $"{device.Name}: choose one of the filter levels.");
         }
 
+        issues.AddRange(AccessPlan.Validate(c.Access));
+        issues.AddRange(DeviceName.Validate(c.Names));
         return issues;
     }
 

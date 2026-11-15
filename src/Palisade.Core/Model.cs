@@ -25,10 +25,16 @@ public sealed class FirewallConfig
     public int LanPrefix { get; set; } = 24;
     public bool NatEnabled { get; set; } = true;
     public bool AllowManagementFromWan { get; set; }
+    /// <summary>A third port, usually the Wi-Fi, that only reaches the firewall's own page and remote login. Empty for none.</summary>
+    public string MaintenanceInterface { get; set; } = "";
     public DhcpSettings Dhcp { get; set; } = new();
     public List<PortForward> PortForwards { get; set; } = [];
     public List<FirewallRule> Rules { get; set; } = [];
     public ContentFilter Filter { get; set; } = new();
+    /// <summary>Pauses and schedules. Saved through its own path, so a pause holds without anyone confirming it.</summary>
+    public List<DeviceAccess> Access { get; set; } = [];
+    /// <summary>Names the owner gave to devices. Only ever shown on screen, never written into a system file.</summary>
+    public List<DeviceName> Names { get; set; } = [];
 
     public FirewallConfig Clone() =>
         JsonSerializer.Deserialize<FirewallConfig>(JsonSerializer.Serialize(this, PalisadeJson.Options), PalisadeJson.Options)!;
@@ -50,6 +56,30 @@ public sealed class Reservation
     public string Name { get; set; } = "";
     public string Mac { get; set; } = "";
     public string Address { get; set; } = "";
+}
+
+public sealed class DeviceName
+{
+    public string Mac { get; set; } = "";
+    public string Name { get; set; } = "";
+
+    public const int MaxLength = 40;
+
+    public static List<ValidationIssue> Validate(IReadOnlyList<DeviceName> names)
+    {
+        var issues = new List<ValidationIssue>();
+        if (names.Count > 500) issues.Add(new("Names", "At most 500 devices can have a name of their own."));
+        var seen = new HashSet<string>();
+        foreach (var n in names)
+        {
+            var field = $"Name.{n.Mac}";
+            if (!ConfigValidator.TryNormalizeMac(n.Mac, out var mac) || mac != n.Mac) issues.Add(new(field, $"\"{n.Mac}\" is not a valid hardware (MAC) address."));
+            else if (!seen.Add(n.Mac)) issues.Add(new(field, $"{n.Mac} has two names. Keep one."));
+            if (n.Name.Length is 0 or > MaxLength || n.Name != n.Name.Trim() || n.Name.Any(char.IsControl))
+                issues.Add(new(field, $"A device name needs 1 to {MaxLength} characters."));
+        }
+        return issues;
+    }
 }
 
 public sealed class PortForward
@@ -80,7 +110,10 @@ public sealed class FirewallRule
     public bool Enabled { get; set; } = true;
 }
 
-public sealed record InterfaceStatus(string Name, string Mac, bool IsUp, List<string> Addresses, long RxBytes, long TxBytes);
+public sealed record InterfaceStatus(string Name, string Mac, bool IsUp, List<string> Addresses, long RxBytes, long TxBytes)
+{
+    public bool IsWireless { get; init; }
+}
 
 public sealed class SystemStatus
 {
@@ -118,6 +151,13 @@ public interface IFirewallBackend
     Task RevertAsync(CancellationToken ct = default);
     Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct = default);
     Task<UsageReport> GetUsageAsync(CancellationToken ct = default);
+    /// <summary>Replaces every pause and schedule. Takes effect and is saved at once: it cannot cut anyone off from the firewall itself, so there is nothing to confirm.</summary>
+    Task<ApplyResult> SetAccessAsync(List<DeviceAccess> access, CancellationToken ct = default);
+    /// <summary>Replaces the names given to devices. Saved at once; nothing on the network changes.</summary>
+    Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default);
+    Task<WifiStatus> GetWifiAsync(CancellationToken ct = default);
+    /// <summary>Joins another Wi-Fi network. If joining fails, the previous Wi-Fi settings are put back.</summary>
+    Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default);
 }
 
 public static class NewId

@@ -5,6 +5,12 @@ namespace Palisade.Web.Services;
 
 public sealed record Device(string Name, string Address, string Mac, bool Online, Reservation? Reservation, FirewallRule? BlockRule)
 {
+    /// <summary>Pause and schedule settings, when this device has any.</summary>
+    public DeviceAccess? Access { get; init; }
+    /// <summary>What the device is called without a name from the owner: its fixed-address name or what it called itself.</summary>
+    public string OwnName { get; init; } = "";
+    public bool Renamed { get; init; }
+
     /// <summary>Device names go into config files, so reduce whatever the device called itself to letters, digits and dashes.</summary>
     public string SafeName
     {
@@ -24,6 +30,28 @@ public sealed class FirewallState(IFirewallBackend backend)
     public SystemStatus? Status { get; private set; }
     public IReadOnlyList<DhcpLease> Leases { get; private set; } = [];
     public UsageReport? Usage { get; private set; }
+    public WifiStatus? Wifi { get; private set; }
+
+    public async Task RefreshWifiAsync()
+    {
+        try { Wifi = await backend.GetWifiAsync(); }
+        catch (Exception) { Wifi = null; }
+        Changed?.Invoke();
+    }
+
+    public async Task<IReadOnlyList<ValidationIssue>> JoinWifiAsync(string ssid, string passphrase)
+    {
+        try
+        {
+            var result = await backend.SetWifiAsync(new WifiRequest { Ssid = ssid, Passphrase = passphrase });
+            await RefreshWifiAsync();
+            return result.Ok ? [] : result.Issues;
+        }
+        catch (Exception ex)
+        {
+            return [new("", $"The firewall did not answer while changing the Wi-Fi. If you are connected through that Wi-Fi, this is expected: reconnect and look again. ({ex.Message})")];
+        }
+    }
     public string? Error { get; private set; }
 
     public event Action? Changed;
@@ -86,6 +114,48 @@ public sealed class FirewallState(IFirewallBackend backend)
         return [];
     }
 
+    /// <summary>Saves pauses and schedules. Unlike other settings these take effect and stay without a confirmation step.</summary>
+    public async Task<IReadOnlyList<ValidationIssue>> SaveAccessAsync(Action<List<DeviceAccess>> change)
+    {
+        if (Config is null) return [new("", "Settings have not loaded yet.")];
+        try
+        {
+            // Start from the firewall's own copy, so a pause set in another window is not undone by this one.
+            var access = (await backend.GetConfigAsync()).Access;
+            change(access);
+            var result = await backend.SetAccessAsync(access);
+            if (!result.Ok) return result.Issues;
+            Config.Access = access;
+        }
+        catch (Exception ex)
+        {
+            return [new("", $"The firewall service is not answering, so nothing was changed. ({ex.Message})")];
+        }
+        Changed?.Invoke();
+        return [];
+    }
+
+    /// <summary>Gives a device a name of the owner's choosing, or takes it away again when the name is empty.</summary>
+    public async Task<IReadOnlyList<ValidationIssue>> RenameAsync(string mac, string name)
+    {
+        if (Config is null) return [new("", "Settings have not loaded yet.")];
+        try
+        {
+            var names = (await backend.GetConfigAsync()).Names;
+            names.RemoveAll(n => n.Mac == mac);
+            if (name.Length > 0) names.Add(new DeviceName { Mac = mac, Name = name });
+            var result = await backend.SetNamesAsync(names);
+            if (!result.Ok) return result.Issues;
+            Config.Names = names;
+        }
+        catch (Exception ex)
+        {
+            return [new("", $"The firewall service is not answering, so nothing was changed. ({ex.Message})")];
+        }
+        Changed?.Invoke();
+        return [];
+    }
+
     public Task ConfirmAsync() => backend.ConfirmAsync();
 
     public async Task RevertAsync()
@@ -113,7 +183,14 @@ public sealed class FirewallState(IFirewallBackend backend)
         }
         foreach (var r in Config.Dhcp.Reservations.Where(r => Leases.All(l => l.Mac != r.Mac)))
             devices.Add(new Device(r.Name, r.Address, r.Mac, false, r, Config.Rules.FirstOrDefault(rule => IsDeviceBlock(rule, r.Address))));
-        return devices;
+        // A paused or scheduled device that is away has no address, but must stay listed so it can be resumed.
+        foreach (var a in Config.Access.Where(a => devices.All(d => d.Mac != a.Mac)))
+            devices.Add(new Device(a.Name, "", a.Mac, false, null, null));
+        return [.. devices.Select(d =>
+        {
+            var given = Config.Names.FirstOrDefault(n => n.Mac == d.Mac)?.Name;
+            return d with { Access = Config.Access.FirstOrDefault(a => a.Mac == d.Mac), OwnName = d.Name, Name = given ?? d.Name, Renamed = given is not null };
+        })];
     }
 }
 

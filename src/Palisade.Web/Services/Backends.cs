@@ -28,7 +28,7 @@ public sealed class AgentClient : IFirewallBackend, IDisposable
                 }
             },
         };
-        _http = new HttpClient(handler) { BaseAddress = new Uri("http://agent/"), Timeout = TimeSpan.FromSeconds(30) };
+        _http = new HttpClient(handler) { BaseAddress = new Uri("http://agent/"), Timeout = TimeSpan.FromSeconds(60) };
     }
 
     public async Task<SystemStatus> GetStatusAsync(CancellationToken ct = default) =>
@@ -42,6 +42,30 @@ public sealed class AgentClient : IFirewallBackend, IDisposable
 
     public async Task<UsageReport> GetUsageAsync(CancellationToken ct = default) =>
         (await _http.GetFromJsonAsync<UsageReport>("usage", PalisadeJson.Options, ct))!;
+
+    public async Task<WifiStatus> GetWifiAsync(CancellationToken ct = default) =>
+        (await _http.GetFromJsonAsync<WifiStatus>("wifi", PalisadeJson.Options, ct))!;
+
+    public async Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("wifi", request, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("names", names, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<ApplyResult> SetAccessAsync(List<DeviceAccess> access, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("access", access, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
 
     public async Task<ApplyResult> ApplyAsync(FirewallConfig config, CancellationToken ct = default)
     {
@@ -70,6 +94,7 @@ public sealed class SimulatedPlatform : ISystemPlatform
     private DateTimeOffset _lastSample = DateTimeOffset.UtcNow;
     private long _rx = 48_000_000, _tx = 9_000_000;
     private FirewallConfig? _applied;
+    private string _wifi = "Demo Wi-Fi";
     private readonly UsageTracker _usage = new(DateTimeOffset.UtcNow);
     private readonly Dictionary<string, (long Down, long Up)> _counters = [];
     private DateTimeOffset _usageAt = DateTimeOffset.UtcNow;
@@ -81,6 +106,20 @@ public sealed class SimulatedPlatform : ISystemPlatform
     {
         _applied = config.Clone();
         return Task.CompletedTask;
+    }
+
+    public Task SetAccessAsync(IReadOnlyList<DeviceAccess> access, CancellationToken ct) => Task.CompletedTask;
+
+    public Task<WifiStatus> GetWifiAsync(CancellationToken ct) =>
+        Task.FromResult(new WifiStatus { Interface = "wlp3s0", Ssid = _wifi, Connected = true, Address = "10.0.0.88" });
+
+    public async Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct)
+    {
+        await Task.Delay(1500, ct);
+        // The pretend network refuses one name, so the "could not join" message can be seen in the demo.
+        if (request.Ssid == "wrong") return ApplyResult.Failed("The firewall could not join that Wi-Fi network. Check the name and the password. The previous Wi-Fi settings are back in use.");
+        _wifi = request.Ssid;
+        return new ApplyResult { Ok = true };
     }
 
     public Task ClearAsync(CancellationToken ct)
@@ -110,6 +149,7 @@ public sealed class SimulatedPlatform : ISystemPlatform
             [
                 new("enp1s0", "52:54:00:00:00:01", true, ["10.0.0.57/24"], _rx, _tx),
                 new("enp2s0", "52:54:00:00:00:02", true, lanAddresses, _tx, _rx),
+                new("wlp3s0", "52:54:00:00:00:03", true, ["10.0.0.88/24"], 0, 0) { IsWireless = true },
             ],
         });
     }

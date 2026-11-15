@@ -15,8 +15,16 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     private const string SysctlConf = "/etc/sysctl.d/90-palisade.conf";
     private const string LeaseFile = "/var/lib/misc/dnsmasq.leases";
     private const string DnsInstanceDirectory = "/etc/palisade/dns";
+    private const string InterfacesFile = "/etc/network/interfaces";
+    private const string WanInterfaceConf = "/etc/network/interfaces.d/palisade-wan";
+    private const string WifiInterfaceConf = "/etc/network/interfaces.d/palisade-wifi";
+
+    private readonly SemaphoreSlim _wifiGate = new(1, 1);
 
     private readonly UsageTracker _usage = new(DateTimeOffset.UtcNow);
+    private readonly SemaphoreSlim _accessGate = new(1, 1);
+    private IReadOnlyList<DeviceAccess> _access = [];
+    private string? _pausedInKernel;
     private readonly SemaphoreSlim _usageGate = new(1, 1);
     private DateTimeOffset _internetCheckedAt;
     private bool _internetReachable;
@@ -33,6 +41,22 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
             problems.Add($"Port {config.LanInterface} is the one this machine uses to reach the internet, so it can't be the home network port. Choose the other port for your devices.");
             return problems;
         }
+        // The same range on both sides is the one mistake that makes the whole firewall unreachable:
+        // replies meant for the internet side leave through the home network port instead.
+        if (Ip4.TryParse(config.LanAddress, out var lan))
+        {
+            var wan = await RunAsync("ip", ["-4", "-o", "addr", "show", "dev", config.WanInterface, "scope", "global"], ct);
+            foreach (var word in wan.Output.Split([' ', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!word.Contains('/') || !AddressSpec.TryParseCidr(word, out var address, out var prefix)) continue;
+                if (lan.IsIn(address, Math.Min(prefix, config.LanPrefix)))
+                {
+                    problems.Add($"The internet port ({config.WanInterface}) has the address {word}, which is in the same range as your network ({config.LanAddress}). Give your network a different range, such as 192.168.50.1 or 10.10.10.1.");
+                    return problems;
+                }
+            }
+        }
+
         var nft = Path.Combine(dataDirectory, "candidate.nft");
         var dnsmasq = Path.Combine(dataDirectory, "candidate.dnsmasq.conf");
         await File.WriteAllTextAsync(nft, files.Nftables, ct);
@@ -55,8 +79,9 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     public async Task ApplyAsync(FirewallConfig config, GeneratedFiles files, CancellationToken ct)
     {
         await WriteAtomicAsync(SysctlConf, files.Sysctl, ct);
-        await MustRunAsync("sysctl", ["-w", "net.ipv4.ip_forward=1"], ct);
+        await MustRunAsync("sysctl", ["-q", "-p", SysctlConf], ct);
 
+        await ApplyWanPortAsync(config.WanInterface, files.WanInterface, ct);
         await WriteAtomicAsync(LanInterfaceConf, files.LanInterface, ct);
         var wanted = $"{config.LanAddress}/{config.LanPrefix}";
         await MustRunAsync("ip", ["link", "set", "dev", config.LanInterface, "up"], ct);
@@ -87,6 +112,8 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         // nftables.service loads this same file at boot, so protection never depends on this agent being up.
         await WriteAtomicAsync(NftablesConf, files.Nftables, ct);
         await MustRunAsync("nft", ["-f", NftablesConf], ct);
+        // Loading the rules emptied the set of paused devices, so fill it again straight away.
+        await SetAccessAsync(config.Access, forget: true, ct);
 
         // The browser's reachability check cannot notice dead name lookups, and to a household those look
         // like "the internet is down". Failing here makes the engine put the previous settings back.
@@ -95,8 +122,48 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
                 throw new InvalidOperationException($"the name server on port {port} did not answer after the change");
     }
 
+    public Task SetAccessAsync(IReadOnlyList<DeviceAccess> access, CancellationToken ct) => SetAccessAsync(access, forget: false, ct);
+
+    private async Task SetAccessAsync(IReadOnlyList<DeviceAccess>? access, bool forget, CancellationToken ct)
+    {
+        await _accessGate.WaitAsync(ct);
+        try
+        {
+            if (access is not null) _access = access;
+            if (forget) _pausedInKernel = null;
+            var script = AccessPlan.SetScript(AccessPlan.OffNow(_access, DateTimeOffset.UtcNow, DateTime.Now));
+            // The clock is checked often, but the kernel is only touched when the answer changed.
+            if (script == _pausedInKernel) return;
+            var path = Path.Combine(dataDirectory, "paused.nft");
+            await File.WriteAllTextAsync(path, script, ct);
+            var result = await RunAsync("nft", ["-f", path], ct);
+            if (result.ExitCode == 0) _pausedInKernel = script;
+            // Before first setup there is no table to fill, which is not worth a warning.
+            else if (_access.Count > 0) logger.LogWarning("Could not update the paused devices: {Error}", result.Error.Trim());
+        }
+        finally { _accessGate.Release(); }
+    }
+
+    /// <summary>Starts and ends off times and timed pauses as the clock moves. Started once by the host.</summary>
+    public async Task WatchClockAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try { await SetAccessAsync(null, forget: false, ct); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "Checking the off times failed"); }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
     public async Task ClearAsync(CancellationToken ct)
     {
+        await _accessGate.WaitAsync(ct);
+        _pausedInKernel = null;
+        _accessGate.Release();
         await WriteAtomicAsync(NftablesConf, "#!/usr/sbin/nft -f\nflush ruleset\n", ct);
         await RunAsync("nft", ["flush", "ruleset"], ct);
         File.Delete(DnsmasqConf);
@@ -132,7 +199,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
                 .ToList();
             var stats = nic.GetIPStatistics();
             var mac = string.Join(':', nic.GetPhysicalAddress().GetAddressBytes().Select(b => b.ToString("x2")));
-            status.Interfaces.Add(new InterfaceStatus(nic.Name, mac, nic.OperationalStatus == OperationalStatus.Up, addresses, stats.BytesReceived, stats.BytesSent));
+            status.Interfaces.Add(new InterfaceStatus(nic.Name, mac, nic.OperationalStatus == OperationalStatus.Up, addresses, stats.BytesReceived, stats.BytesSent) { IsWireless = IsWireless(nic.Name) });
         }
 
         status.FirewallActive = (await RunAsync("nft", ["list", "table", "inet", "palisade"], ct)).ExitCode == 0;
@@ -180,6 +247,112 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
             return _usage.Report(now);
         }
         finally { _usageGate.Release(); }
+    }
+
+    private static bool IsWireless(string name) => Directory.Exists($"/sys/class/net/{name}/wireless");
+
+    private static string ReadOrEmpty(string path) => File.Exists(path) ? File.ReadAllText(path) : "";
+
+    /// <summary>
+    /// A wired internet port needs something to ask the provider for an address. Debian only sets that up
+    /// for the port chosen during its own installation, so Palisade does it for any other wired port.
+    /// </summary>
+    private async Task ApplyWanPortAsync(string wan, string stanza, CancellationToken ct)
+    {
+        var before = ReadOrEmpty(WanInterfaceConf);
+        var wanted = IsWireless(wan) || WifiPlan.IsDefined(ReadOrEmpty(InterfacesFile), wan) || WifiPlan.IsDefined(ReadOrEmpty(WifiInterfaceConf), wan) ? "" : stanza;
+        if (before == wanted) return;
+
+        // Release the port Palisade looked after until now, while its description is still on disk.
+        var previous = System.Text.RegularExpressions.Regex.Match(before, @"^iface (\S+) ", System.Text.RegularExpressions.RegexOptions.Multiline);
+        if (previous.Success && previous.Groups[1].Value != wan) await RunAsync("ifdown", ["--force", previous.Groups[1].Value], ct);
+
+        if (wanted.Length == 0)
+        {
+            File.Delete(WanInterfaceConf);
+            return;
+        }
+        await WriteAtomicAsync(WanInterfaceConf, wanted, ct);
+        // Asking for an address can take half a minute with no cable in, far longer than a save may take,
+        // so it carries on by itself. Plugging the cable in later starts it again.
+        _ = Task.Run(async () =>
+        {
+            var up = await RunAsync("ifup", [wan], CancellationToken.None);
+            if (up.ExitCode != 0) logger.LogWarning("Bringing up the internet port {Port} did not succeed: {Error}", wan, up.Error.Trim());
+        }, CancellationToken.None);
+    }
+
+    private static string? WifiInterface() =>
+        NetworkInterface.GetAllNetworkInterfaces().Select(n => n.Name).FirstOrDefault(IsWireless);
+
+    public async Task<WifiStatus> GetWifiAsync(CancellationToken ct)
+    {
+        if (WifiInterface() is not { } iface) return new WifiStatus();
+        var status = new WifiStatus { Interface = iface };
+        var cli = await RunAsync("wpa_cli", ["-i", iface, "status"], ct);
+        foreach (var line in cli.Output.Split('\n', StringSplitOptions.TrimEntries))
+        {
+            if (line.StartsWith("ssid=", StringComparison.Ordinal)) status.Ssid = line[5..];
+            else if (line == "wpa_state=COMPLETED") status.Connected = true;
+            else if (line.StartsWith("ip_address=", StringComparison.Ordinal)) status.Address = line[11..];
+        }
+        return status;
+    }
+
+    public async Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken requestAborted)
+    {
+        if (WifiInterface() is not { } iface) return ApplyResult.Failed("This machine has no Wi-Fi.");
+        // Whoever asked may be connected through this very Wi-Fi and vanish halfway. The change, and the
+        // step back if it fails, must still run to the end, so nothing below listens to the caller leaving.
+        var ct = CancellationToken.None;
+        await _wifiGate.WaitAsync(ct);
+        try
+        {
+            var oldMain = ReadOrEmpty(InterfacesFile);
+            var oldStanza = File.Exists(WifiInterfaceConf) ? File.ReadAllText(WifiInterfaceConf) : null;
+            var oldSupplicant = File.Exists(WifiPlan.SupplicantPath) ? File.ReadAllText(WifiPlan.SupplicantPath) : null;
+            if (!File.Exists(InterfacesFile + ".before-palisade") && File.Exists(InterfacesFile))
+                File.Copy(InterfacesFile, InterfacesFile + ".before-palisade");
+
+            // Taken down with the old description still on disk, so its own cleanup steps run.
+            await RunAsync("ifdown", ["--force", iface], ct);
+            WriteSecret(WifiPlan.SupplicantPath, WifiPlan.SupplicantConf(request));
+            await WriteAtomicAsync(InterfacesFile, WifiPlan.StripStanza(oldMain, iface), ct);
+            await WriteAtomicAsync(WifiInterfaceConf, WifiPlan.WifiStanza(iface), ct);
+            _ = Task.Run(() => RunAsync("ifup", [iface], CancellationToken.None), CancellationToken.None);
+
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(22);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(1000, ct);
+                if ((await GetWifiAsync(ct)).Connected) return new ApplyResult { Ok = true };
+            }
+
+            logger.LogWarning("Could not join the Wi-Fi network, putting the previous Wi-Fi settings back");
+            await RunAsync("ifdown", ["--force", iface], ct);
+            await WriteAtomicAsync(InterfacesFile, oldMain, ct);
+            if (oldStanza is null) File.Delete(WifiInterfaceConf); else await WriteAtomicAsync(WifiInterfaceConf, oldStanza, ct);
+            if (oldSupplicant is null) File.Delete(WifiPlan.SupplicantPath); else WriteSecret(WifiPlan.SupplicantPath, oldSupplicant);
+            _ = Task.Run(() => RunAsync("ifup", [iface], CancellationToken.None), CancellationToken.None);
+            return ApplyResult.Failed("The firewall could not join that Wi-Fi network. Check the name and the password. The previous Wi-Fi settings are back in use.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Changing the Wi-Fi failed");
+            return ApplyResult.Failed($"The Wi-Fi could not be changed. ({ex.Message})");
+        }
+        finally { _wifiGate.Release(); }
+    }
+
+    /// <summary>Holds a key to a Wi-Fi network, so only root may read it, from the moment the file exists.</summary>
+    private static void WriteSecret(string path, string content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + ".palisade-tmp";
+        File.Delete(temp);
+        using (var stream = new FileStream(temp, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite }))
+            stream.Write(System.Text.Encoding.UTF8.GetBytes(content));
+        File.Move(temp, path, overwrite: true);
     }
 
     private async Task<bool> CheckInternetAsync(FirewallConfig active, CancellationToken ct)

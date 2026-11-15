@@ -158,7 +158,10 @@ public class CoreTests
         Assert.Empty(files.DnsInstances);
         Assert.DoesNotContain("redirect", files.Nftables);
         Assert.DoesNotContain("853", files.Nftables);
-        Assert.DoesNotContain("ether saddr", files.Nftables);
+        // The only hardware-address rule is the pause rule, and its set starts out empty.
+        Assert.Single(files.Nftables.Split('\n'), line => line.Contains("ether saddr"));
+        Assert.Contains("set paused { type ether_addr; }", files.Nftables);
+        Assert.Empty(c.Access);
         Assert.Contains("server=1.1.1.1\n", files.Dnsmasq);
         Assert.DoesNotContain("use-application-dns.net", files.Dnsmasq);
     }
@@ -370,6 +373,180 @@ public class CoreTests
     }
 
     [Fact]
+    public void Pause_rule_comes_before_established_traffic_is_let_through()
+    {
+        var text = ConfigRenderer.Nftables(Sample());
+        var forward = text[text.IndexOf("chain forward", StringComparison.Ordinal)..];
+
+        Assert.Contains("iifname \"enp2s0\" ether saddr @paused counter reject", forward);
+        Assert.True(forward.IndexOf("@paused", StringComparison.Ordinal) < forward.IndexOf("ct state established", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Off_times_follow_the_clock_across_midnight_and_the_week()
+    {
+        var device = new DeviceAccess
+        {
+            Mac = "aa:bb:cc:dd:ee:20",
+            Name = "Tablet",
+            OffTimes =
+            {
+                new OffTime { Days = { DayOfWeek.Sunday, DayOfWeek.Monday }, From = "21:00", To = "07:00" },
+                new OffTime { Days = { DayOfWeek.Wednesday }, From = "15:00", To = "16:30" },
+                new OffTime { Days = { DayOfWeek.Friday }, From = "10:00", To = "10:00" },
+            },
+        };
+        // 1 November 2026 is a Sunday.
+        bool Off(int day, int hour, int minute) => AccessPlan.CurrentOffTime(device, new DateTime(2026, 11, day, hour, minute, 0)) is not null;
+
+        Assert.False(Off(1, 20, 59));
+        Assert.True(Off(1, 21, 0));
+        Assert.True(Off(2, 6, 59));   // Monday morning, from Sunday night
+        Assert.False(Off(2, 7, 0));
+        Assert.True(Off(2, 23, 30));  // Monday night
+        Assert.True(Off(3, 3, 0));    // Tuesday morning, from Monday night
+        Assert.False(Off(3, 22, 0));  // Tuesday night is not listed
+        Assert.False(Off(1, 6, 0));   // Sunday morning: Saturday night is not listed
+        Assert.True(Off(4, 15, 0));
+        Assert.True(Off(4, 16, 29));
+        Assert.False(Off(4, 16, 30));
+        Assert.False(Off(6, 10, 0));  // equal start and end never switches anything off
+    }
+
+    [Fact]
+    public void Timed_pause_ends_by_itself_and_an_open_pause_does_not()
+    {
+        var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.FromHours(2));
+        var timed = new DeviceAccess { Mac = "aa:bb:cc:dd:ee:21", Name = "Console", Paused = true, PausedUntil = now.AddMinutes(30) };
+        var open = new DeviceAccess { Mac = "aa:bb:cc:dd:ee:20", Name = "Tablet", Paused = true };
+        var free = new DeviceAccess { Mac = "aa:bb:cc:dd:ee:22", Name = "Laptop" };
+
+        Assert.Equal(["aa:bb:cc:dd:ee:20", "aa:bb:cc:dd:ee:21"], AccessPlan.OffNow([timed, open, free], now, now.DateTime));
+        Assert.Equal(["aa:bb:cc:dd:ee:20"], AccessPlan.OffNow([timed, open, free], now.AddMinutes(30), now.DateTime));
+    }
+
+    [Fact]
+    public void Paused_set_script_is_one_step_and_refuses_unsafe_addresses()
+    {
+        Assert.Equal("flush set inet palisade paused\n", AccessPlan.SetScript([]));
+        Assert.Equal("flush set inet palisade paused\nadd element inet palisade paused { aa:bb:cc:dd:ee:20, aa:bb:cc:dd:ee:21 }\n",
+            AccessPlan.SetScript(["aa:bb:cc:dd:ee:20", "aa:bb:cc:dd:ee:21"]));
+        Assert.Throws<InvalidOperationException>(() => AccessPlan.SetScript(["aa:bb:cc:dd:ee:20 }\nflush ruleset\n"]));
+        Assert.Throws<InvalidOperationException>(() => AccessPlan.SetScript(["AA:BB:CC:DD:EE:20"]));
+    }
+
+    [Fact]
+    public void Access_validation_catches_common_mistakes()
+    {
+        var bad = new List<DeviceAccess>
+        {
+            new() { Mac = "aa:bb:cc:dd:ee:20", Name = "Tablet", OffTimes = { new OffTime { Days = { DayOfWeek.Monday }, From = "9:00", To = "25:00" } } },
+            new() { Mac = "aa:bb:cc:dd:ee:20", Name = "Tablet again" },
+            new() { Mac = "aa:bb:cc:dd:ee:23", Name = "No days", OffTimes = { new OffTime { From = "21:00", To = "07:00" } } },
+            new() { Mac = "aa:bb:cc:dd:ee:24", Name = "Same", OffTimes = { new OffTime { Days = { DayOfWeek.Monday }, From = "08:00", To = "08:00" } } },
+            new() { Mac = "aa:bb:cc:dd:ee:25", Name = "bad\nname" },
+        };
+        var fields = AccessPlan.Validate(bad).Select(i => i.Field).Distinct().ToList();
+
+        Assert.Equal(4, fields.Count);
+        Assert.Empty(AccessPlan.Validate([new() { Mac = "aa:bb:cc:dd:ee:20", Name = "Tablet", OffTimes = { new OffTime { Days = { DayOfWeek.Monday } } } }]));
+        var c = Sample();
+        c.Access.AddRange(bad);
+        Assert.NotEmpty(ConfigValidator.Validate(c));
+    }
+
+    [Fact]
+    public void Maintenance_port_reaches_the_firewall_and_nothing_else()
+    {
+        var c = Sample();
+        c.MaintenanceInterface = "wlp3s0";
+        Assert.Empty(ConfigValidator.Validate(c));
+        var text = ConfigRenderer.Nftables(c);
+
+        Assert.Contains("iifname \"wlp3s0\" tcp dport { 22, 8080, 8081 } accept comment \"manage from maintenance port\"", text);
+        // It appears once, in the input chain: nothing is forwarded to or from it, and it gets no NAT.
+        Assert.Single(text.Split('\n'), line => line.Contains("wlp3s0"));
+
+        c.MaintenanceInterface = c.LanInterface;
+        Assert.Contains("MaintenanceInterface", ConfigValidator.Validate(c).Select(i => i.Field));
+        c.MaintenanceInterface = "wl p\"; drop";
+        Assert.NotEmpty(ConfigValidator.Validate(c));
+        Assert.Throws<InvalidOperationException>(() => ConfigRenderer.Nftables(c));
+        Assert.DoesNotContain("maintenance", ConfigRenderer.Nftables(Sample()));
+    }
+
+    [Fact]
+    public void Each_port_answers_only_for_its_own_address()
+    {
+        var sysctl = ConfigRenderer.Render(Sample()).Sysctl;
+        Assert.Contains("net.ipv4.ip_forward=1\n", sysctl);
+        Assert.Contains("net.ipv4.conf.all.arp_ignore=1\n", sysctl);
+        Assert.Contains("net.ipv4.conf.all.arp_announce=2\n", sysctl);
+    }
+
+    [Fact]
+    public void Wired_internet_port_asks_for_an_address()
+    {
+        Assert.Equal("allow-hotplug enp1s0\niface enp1s0 inet dhcp\n", ConfigRenderer.Render(Sample()).WanInterface.Split('\n', 2)[1]);
+    }
+
+    [Fact]
+    public void Wifi_settings_file_holds_only_hex_whatever_is_typed()
+    {
+        // The published example for this key derivation: network "IEEE", password "password".
+        var conf = WifiPlan.SupplicantConf(new WifiRequest { Ssid = "IEEE", Passphrase = "password" });
+        Assert.Contains("    ssid=49454545\n", conf);
+        Assert.Contains("    psk=f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e\n", conf);
+
+        var tricky = WifiPlan.SupplicantConf(new WifiRequest { Ssid = "Caf\u00e9 \"x\" }", Passphrase = "pass\"word}#1" });
+        Assert.DoesNotContain("Caf", tricky);
+        Assert.DoesNotContain("word", tricky);
+        Assert.Equal(6, tricky.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+
+        Assert.Contains("key_mgmt=NONE", WifiPlan.SupplicantConf(new WifiRequest { Ssid = "Open cafe" }));
+        Assert.Throws<InvalidOperationException>(() => WifiPlan.SupplicantConf(new WifiRequest { Ssid = "a\nb", Passphrase = "password" }));
+        Assert.NotEmpty(WifiPlan.Validate(new WifiRequest { Ssid = "Home", Passphrase = "short" }));
+        Assert.NotEmpty(WifiPlan.Validate(new WifiRequest { Ssid = "Home", Passphrase = "pass\nword123" }));
+        Assert.NotEmpty(WifiPlan.Validate(new WifiRequest { Ssid = "", Passphrase = "password" }));
+        Assert.NotEmpty(WifiPlan.Validate(new WifiRequest { Ssid = new string('x', 33), Passphrase = "password" }));
+        Assert.Throws<InvalidOperationException>(() => WifiPlan.WifiStanza("wlan0\npost-up reboot"));
+    }
+
+    [Fact]
+    public void Taking_over_a_port_removes_only_that_port_from_debians_file()
+    {
+        const string file = """
+            # This file describes the network interfaces available on your system
+
+            source /etc/network/interfaces.d/*
+
+            # The loopback network interface
+            auto lo
+            iface lo inet loopback
+
+            # The primary network interface
+            allow-hotplug wlp58s0
+            iface wlp58s0 inet dhcp
+            	wpa-ssid Example
+            	wpa-psk  secretsecret
+
+            allow-hotplug enp1s0
+            iface enp1s0 inet dhcp
+            """;
+
+        Assert.True(WifiPlan.IsDefined(file, "wlp58s0"));
+        Assert.False(WifiPlan.IsDefined(file, "wlp58s"));
+        var stripped = WifiPlan.StripStanza(file, "wlp58s0");
+
+        Assert.DoesNotContain("wlp58s0", stripped);
+        Assert.DoesNotContain("wpa-", stripped);
+        Assert.Contains("iface lo inet loopback", stripped);
+        Assert.Contains("source /etc/network/interfaces.d/*", stripped);
+        Assert.Contains("allow-hotplug enp1s0\niface enp1s0 inet dhcp", stripped.Replace("\r", ""));
+        Assert.Equal(stripped, WifiPlan.StripStanza(stripped, "wlp58s0"));
+    }
+
+    [Fact]
     public void Lease_file_is_parsed()
     {
         var leases = LeaseParser.Parse("1800000000 aa:bb:cc:dd:ee:01 192.168.50.101 laptop 01:aa:bb:cc:dd:ee:01\n1800000100 AA:BB:CC:DD:EE:02 192.168.50.102 * *\ngarbage\n");
@@ -411,6 +588,14 @@ public class EngineTests
         public Task<SystemStatus> GetStatusAsync(FirewallConfig active, CancellationToken ct) => Task.FromResult(new SystemStatus());
         public Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<DhcpLease>>([]);
         public Task<UsageReport> GetUsageAsync(CancellationToken ct) => Task.FromResult(new UsageReport());
+        public Task<WifiStatus> GetWifiAsync(CancellationToken ct) => Task.FromResult(new WifiStatus());
+        public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct) => Task.FromResult(new ApplyResult { Ok = true });
+
+        public Task SetAccessAsync(IReadOnlyList<DeviceAccess> access, CancellationToken ct)
+        {
+            Log.Add($"access:{string.Join(",", access.Where(a => a.Paused).Select(a => a.Mac))}");
+            return Task.CompletedTask;
+        }
     }
 
     private static FirewallConfig Config(string lan = "192.168.50.1") => new() { WanInterface = "wan0", LanInterface = "lan0", LanAddress = lan };
@@ -468,6 +653,54 @@ public class EngineTests
 
         Assert.Equal(["apply:192.168.50.1", "apply:192.168.60.1", "apply:192.168.50.1"], platform.Log);
         Assert.Equal("192.168.50.1", (await engine.GetConfigAsync()).LanAddress);
+    }
+
+    [Fact]
+    public async Task Pause_is_saved_at_once_and_survives_other_saves_and_undo()
+    {
+        var dir = TempDir();
+        var platform = new FakePlatform();
+        const string mac = "aa:bb:cc:dd:ee:20";
+        using (var engine = new FirewallEngine(platform, dir, TimeSpan.FromSeconds(30)))
+        {
+            await engine.InitializeAsync();
+            await engine.ApplyAsync(Config());
+            await engine.ConfirmAsync();
+
+            Assert.True((await engine.SetAccessAsync([new DeviceAccess { Mac = mac, Name = "Tablet", Paused = true }])).Ok);
+            Assert.Null((await engine.GetStatusAsync()).PendingSecondsLeft);
+
+            // A page that loaded before the pause saves something else: the pause must not be wiped,
+            // neither while that change is pending nor when it is undone.
+            var stale = Config("192.168.60.1");
+            stale.Dhcp.RangeStart = "192.168.60.100";
+            stale.Dhcp.RangeEnd = "192.168.60.200";
+            Assert.True((await engine.ApplyAsync(stale)).Ok);
+            Assert.Equal(mac, Assert.Single((await engine.GetConfigAsync()).Access).Mac);
+            await engine.RevertAsync();
+            Assert.True(Assert.Single((await engine.GetConfigAsync()).Access).Paused);
+
+            Assert.False((await engine.SetAccessAsync([new DeviceAccess { Mac = "nonsense", Name = "Tablet" }])).Ok);
+
+            // Names follow the same path: saved at once, kept through other saves, never part of a pending change.
+            Assert.True((await engine.SetNamesAsync([new DeviceName { Mac = mac, Name = "Emma's iPad (blue)" }])).Ok);
+            Assert.Null((await engine.GetStatusAsync()).PendingSecondsLeft);
+            Assert.True((await engine.ApplyAsync(Config())).Ok);
+            await engine.ConfirmAsync();
+            Assert.False((await engine.SetNamesAsync([new DeviceName { Mac = mac, Name = "two\nlines" }])).Ok);
+            Assert.False((await engine.SetNamesAsync([new DeviceName { Mac = mac, Name = "" }])).Ok);
+            Assert.False((await engine.SetNamesAsync([new DeviceName { Mac = mac, Name = new string('x', 41) }])).Ok);
+            Assert.False((await engine.SetNamesAsync([new DeviceName { Mac = mac, Name = "A" }, new DeviceName { Mac = mac, Name = "B" }])).Ok);
+            Assert.Contains($"access:{mac}", platform.Log);
+        }
+
+        using var restarted = new FirewallEngine(platform, dir, TimeSpan.FromSeconds(30));
+        await restarted.InitializeAsync();
+        Assert.True(Assert.Single((await restarted.GetConfigAsync()).Access).Paused);
+        Assert.Equal("Emma's iPad (blue)", Assert.Single((await restarted.GetConfigAsync()).Names).Name);
+        // A name is for people only: whatever it contains, it never reaches a generated file.
+        var files = ConfigRenderer.Render(await restarted.GetConfigAsync());
+        Assert.DoesNotContain("Emma", files.Nftables + files.Dnsmasq);
     }
 
     [Fact]

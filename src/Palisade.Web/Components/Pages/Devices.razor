@@ -1,15 +1,16 @@
 @page "/devices"
 @inherits StatePage
+@using System.Globalization
 
 <PageTitle>Devices · Palisade</PageTitle>
 
 <h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Devices</h1>
-<p class="mt-2 max-w-2xl text-lg text-muted">Everything that has joined your network. Block a device to cut it off from the internet, or give it a fixed address so opened ports keep pointing at it.</p>
+<p class="mt-2 max-w-2xl text-lg text-muted">Everything that has joined your network. Pause a device's internet, give it off times such as bedtime, or fix its address so opened ports keep pointing at it.</p>
 
 <div class="mt-6 max-w-3xl space-y-4">
-    <Problems Issues="Issues" />
+    @if (_pauseFor is null && _scheduleFor is null && _renameFor is null) { <Problems Issues="Issues" /> }
 
-    @{ var devices = State.Devices(); }
+    @{ var devices = State.Devices(); var now = DateTimeOffset.Now; }
     @if (devices.Count == 0)
     {
         <div class="panel p-6">
@@ -29,51 +30,301 @@
         <ul class="panel divide-y divide-line">
             @foreach (var device in devices)
             {
+                var access = device.Access;
+                var pausedByHand = access is not null && AccessPlan.IsPausedByHand(access, now);
+                var offTime = access is null ? null : AccessPlan.CurrentOffTime(access, now.DateTime);
                 <li class="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
                     <div class="min-w-0 flex-1 basis-56">
                         <p class="truncate text-lg font-bold">@device.Name</p>
-                        <p class="text-sm text-muted">@device.Address · @device.Mac</p>
+                        <p class="text-sm text-muted">@(device.Address.Length > 0 ? $"{device.Address} · " : "")@device.Mac</p>
                         <p class="mt-1 flex flex-wrap gap-2">
+                            @if (pausedByHand) { <span class="tag bg-brick-soft text-brick">Internet paused@(access!.PausedUntil is { } until ? $" until {Clock(until)}" : "")</span> }
+                            else if (offTime is not null) { <span class="tag bg-brick-soft text-brick">Off time until @offTime.To</span> }
+                            @if (access is { OffTimes.Count: > 0 } && offTime is null) { <span class="tag bg-sunk text-ink">@Fmt.Plural(access.OffTimes.Count, "off time", "off times")</span> }
                             @if (!device.Online) { <span class="tag bg-sunk text-muted">Not connected now</span> }
                             @if (device.Reservation is not null) { <span class="tag bg-pine-soft text-ink">Fixed address</span> }
-                            @if (device.BlockRule is not null) { <span class="tag bg-brick-soft text-brick">Blocked from the internet</span> }
+                            @if (device.BlockRule is not null) { <span class="tag bg-brick-soft text-brick">Blocked by a rule</span> }
                             @if (Config.Filter.Devices.FirstOrDefault(f => f.Mac == device.Mac) is { } own) { <a class="tag bg-sunk text-ink underline underline-offset-2" href="/filter">Own filter level: @Fmt.FilterLevel(own.Level)</a> }
                         </p>
                     </div>
                     <div class="flex flex-wrap gap-2">
-                        @if (device.BlockRule is null)
+                        @if (pausedByHand)
                         {
-                            <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="() => BlockAsync(device)">Block</button>
+                            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="() => ResumeAsync(device)">Resume internet</button>
                         }
                         else
                         {
-                            <button type="button" class="btn" disabled="@_busy" @onclick="() => UnblockAsync(device)">Unblock</button>
+                            <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="() => OpenPause(device)">Pause internet</button>
                         }
-                        @if (device.Reservation is null)
+                        <button type="button" class="btn" disabled="@_busy" @onclick="() => OpenSchedule(device)">Off times</button>
+                        <button type="button" class="btn" disabled="@_busy" aria-label="@($"Rename {device.Name}")" @onclick="() => OpenRename(device)">Rename</button>
+                        @if (device.BlockRule is not null)
                         {
-                            <button type="button" class="btn" disabled="@_busy" @onclick="() => FixAsync(device)">Fix address</button>
+                            <button type="button" class="btn" disabled="@_busy" @onclick="() => UnblockAsync(device)">Remove block rule</button>
                         }
-                        else
+                        @if (device.Address.Length > 0)
                         {
-                            <button type="button" class="btn" disabled="@(_busy || device.BlockRule is not null)" title="@(device.BlockRule is not null ? "Unblock the device first" : null)" @onclick="() => ReleaseAsync(device)">Release address</button>
+                            @if (device.Reservation is null)
+                            {
+                                <button type="button" class="btn" disabled="@_busy" @onclick="() => FixAsync(device)">Fix address</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn" disabled="@(_busy || device.BlockRule is not null)" title="@(device.BlockRule is not null ? "Remove the block rule first" : null)" @onclick="() => ReleaseAsync(device)">Release address</button>
+                            }
+                            <a class="btn" href="/ports?device=@device.Address">Open a port</a>
                         }
-                        <a class="btn" href="/ports?device=@device.Address">Open a port</a>
                     </div>
                 </li>
             }
         </ul>
-        <p class="text-sm text-muted">Blocking works by address, so a blocked device also gets a fixed address to make the block stick.</p>
+        <div class="max-w-2xl space-y-1 text-sm text-muted">
+            <p>A paused device loses the internet within seconds, even in the middle of a video. It can still reach other devices at home and this page.</p>
+            <p>Devices are recognised by their hardware address. A phone set to change that address looks like a new device and is not paused.</p>
+        </div>
     }
 </div>
 
+<Modal Open="_renameFor is not null" Title="@($"Rename {_renameFor?.Name}")" OnClose="() => _renameFor = null">
+    <form class="space-y-4" @onsubmit="RenameAsync">
+        <div>
+            <label for="device-name" class="field-label">Name</label>
+            <input id="device-name" class="input" maxlength="@DeviceName.MaxLength" autocomplete="off" @bind="_newName" />
+            <p class="field-hint">Shown wherever this device is listed. Leave it empty to go back to "@_renameFor?.OwnName".</p>
+        </div>
+        <Problems Issues="Issues" />
+        <div class="flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary" disabled="@_busy">Save name</button>
+            <button type="button" class="btn" @onclick="() => _renameFor = null">Cancel</button>
+        </div>
+    </form>
+</Modal>
+
+<Modal Open="_pauseFor is not null" Title="@($"Pause the internet for {_pauseFor?.Name}")" OnClose="() => _pauseFor = null">
+    <p class="text-muted">It comes back by itself when the time is up. You can resume it earlier from this page.</p>
+    <div class="mt-4 grid gap-2 sm:grid-cols-2">
+        <button type="button" class="btn" disabled="@_busy" @onclick="() => PauseAsync(TimeSpan.FromMinutes(30))">For 30 minutes</button>
+        <button type="button" class="btn" disabled="@_busy" @onclick="() => PauseAsync(TimeSpan.FromHours(1))">For 1 hour</button>
+        <button type="button" class="btn" disabled="@_busy" @onclick="() => PauseAsync(TimeSpan.FromHours(2))">For 2 hours</button>
+        <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="() => PauseAsync(null)">Until I resume it</button>
+    </div>
+    <div class="mt-4"><Problems Issues="Issues" /></div>
+</Modal>
+
+<Modal Open="_scheduleFor is not null" Title="@($"Off times for {_scheduleFor?.Name}")" OnClose="() => _scheduleFor = null">
+    <p class="text-muted">The internet is off for this device during these times, every week. The firewall's clock says <strong class="text-ink">@DateTime.Now.ToString("dddd HH:mm", CultureInfo.InvariantCulture)</strong>.</p>
+
+    @if (_offTimes.Count == 0)
+    {
+        <p class="mt-4 rounded-md bg-sunk p-3 text-muted">No off times yet. Add one below.</p>
+    }
+    else
+    {
+        <ul class="mt-4 divide-y divide-line rounded-md border border-line">
+            @foreach (var off in _offTimes)
+            {
+                <li class="flex items-center justify-between gap-3 py-2 pl-3 pr-1">
+                    <span>
+                        <span class="font-bold">@off.From to @off.To@(Overnight(off) ? " the next morning" : "")</span>
+                        <span class="block text-sm text-muted">@DayText(off.Days)</span>
+                    </span>
+                    <button type="button" class="btn btn-quiet" aria-label="@($"Remove {off.From} to {off.To}, {DayText(off.Days)}")" @onclick="() => _offTimes.Remove(off)">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+
+    <form class="mt-5 space-y-4 border-t border-line pt-4" @onsubmit="AddOffTime">
+        <fieldset>
+            <legend class="field-label">Add an off time on these days</legend>
+            <div class="flex flex-wrap gap-2">
+                @foreach (var day in Week)
+                {
+                    var on = _days.Contains(day);
+                    <label class="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 @(on ? "border-pine bg-pine-soft" : "border-line")">
+                        <input type="checkbox" class="h-4 w-4 accent-pine" checked="@on" @onchange="() => Toggle(day)" />
+                        <span>@ShortDay(day)</span>
+                    </label>
+                }
+            </div>
+            <div class="mt-2 flex flex-wrap gap-1">
+                <button type="button" class="btn btn-quiet" @onclick="() => _days = [.. Week]">Every day</button>
+                <button type="button" class="btn btn-quiet" @onclick="() => _days = [DayOfWeek.Sunday, DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday]">School nights</button>
+                <button type="button" class="btn btn-quiet" @onclick="() => _days = [DayOfWeek.Friday, DayOfWeek.Saturday]">Weekend nights</button>
+            </div>
+        </fieldset>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label for="off-from" class="field-label">Internet goes off at</label>
+                <input id="off-from" class="input" type="time" @bind="_from" />
+            </div>
+            <div>
+                <label for="off-to" class="field-label">And comes back at</label>
+                <input id="off-to" class="input" type="time" @bind="_to" />
+            </div>
+        </div>
+        <p class="field-hint">If it comes back earlier than it goes off, the off time runs through the night into the next morning.</p>
+        <button type="submit" class="btn">Add this off time</button>
+    </form>
+
+    <div class="mt-5 space-y-4 border-t border-line pt-4">
+        <Problems Issues="Issues" />
+        <div class="flex flex-wrap gap-2">
+            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="SaveScheduleAsync">Save off times</button>
+            <button type="button" class="btn" @onclick="() => _scheduleFor = null">Cancel</button>
+        </div>
+    </div>
+</Modal>
+
 @code {
+    private static readonly DayOfWeek[] Week =
+        [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
+
     private bool _busy;
+    private Device? _pauseFor, _scheduleFor, _renameFor;
+    private string _newName = "";
+
+    private void OpenRename(Device device)
+    {
+        Issues = [];
+        _newName = device.Renamed ? device.Name : "";
+        _renameFor = device;
+    }
+
+    private async Task RenameAsync()
+    {
+        if (_renameFor is not { } device) return;
+        _busy = true;
+        Issues = await State.RenameAsync(device.Mac, _newName.Trim());
+        _busy = false;
+        if (Issues.Count == 0) _renameFor = null;
+    }
+    private List<OffTime> _offTimes = [];
+    private List<DayOfWeek> _days = [];
+    private TimeOnly _from = new(21, 0), _to = new(7, 0);
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        _ = WatchAsync(_cts.Token);
+    }
+
+    // Pauses end and off times begin without anyone saving anything, and new devices join, so look again regularly.
+    private async Task WatchAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await State.RefreshStatusAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private static string Clock(DateTimeOffset time)
+    {
+        var local = time.ToLocalTime();
+        return local.ToString(local.Date == DateTimeOffset.Now.Date ? "HH:mm" : "dddd HH:mm", CultureInfo.InvariantCulture);
+    }
+
+    private static string ShortDay(DayOfWeek day) => day.ToString()[..3];
+
+    private static string DayText(List<DayOfWeek> days) =>
+        days.Count == 7 ? "Every day" : string.Join(", ", Week.Where(days.Contains).Select(ShortDay));
+
+    private static bool Overnight(OffTime off) =>
+        AccessPlan.TryParseTime(off.From, out var from) && AccessPlan.TryParseTime(off.To, out var to) && to <= from;
 
     private async Task RunAsync(Action<FirewallConfig> change)
     {
         _busy = true;
         await SaveAsync(change);
         _busy = false;
+    }
+
+    /// <summary>Changes one device's pause or off times. Returns true when the firewall accepted it.</summary>
+    private async Task<bool> SaveAccessAsync(Device device, Action<DeviceAccess> change)
+    {
+        _busy = true;
+        Issues = await State.SaveAccessAsync(list =>
+        {
+            var now = DateTimeOffset.UtcNow;
+            // Timed pauses that have run out are only clutter by now.
+            foreach (var done in list.Where(a => a.Paused && a.PausedUntil <= now)) (done.Paused, done.PausedUntil) = (false, null);
+            var entry = list.FirstOrDefault(a => a.Mac == device.Mac);
+            if (entry is null) list.Add(entry = new DeviceAccess { Mac = device.Mac, Name = device.SafeName });
+            change(entry);
+            list.RemoveAll(a => !a.Paused && a.OffTimes.Count == 0);
+        });
+        _busy = false;
+        return Issues.Count == 0;
+    }
+
+    private void OpenPause(Device device)
+    {
+        Issues = [];
+        _pauseFor = device;
+    }
+
+    private async Task PauseAsync(TimeSpan? length)
+    {
+        if (_pauseFor is not { } device) return;
+        if (await SaveAccessAsync(device, a => (a.Paused, a.PausedUntil) = (true, length is { } l ? DateTimeOffset.UtcNow + l : null)))
+            _pauseFor = null;
+    }
+
+    private Task ResumeAsync(Device device) => SaveAccessAsync(device, a => (a.Paused, a.PausedUntil) = (false, null));
+
+    private void OpenSchedule(Device device)
+    {
+        Issues = [];
+        _offTimes = [.. (device.Access?.OffTimes ?? []).Select(o => new OffTime { Id = o.Id, Days = [.. o.Days], From = o.From, To = o.To })];
+        _days = [];
+        (_from, _to) = (new(21, 0), new(7, 0));
+        _scheduleFor = device;
+    }
+
+    private void Toggle(DayOfWeek day)
+    {
+        if (!_days.Remove(day)) _days.Add(day);
+    }
+
+    private void AddOffTime()
+    {
+        if (_days.Count == 0)
+        {
+            Issues = [new("", "Tick at least one day for the off time.")];
+            return;
+        }
+        if (_from == _to)
+        {
+            Issues = [new("", "The internet can't go off and come back at the same minute. Change one of the times.")];
+            return;
+        }
+        Issues = [];
+        _offTimes.Add(new OffTime
+        {
+            Days = [.. Week.Where(_days.Contains)],
+            From = _from.ToString("HH:mm", CultureInfo.InvariantCulture),
+            To = _to.ToString("HH:mm", CultureInfo.InvariantCulture),
+        });
+        _days = [];
+    }
+
+    private async Task SaveScheduleAsync()
+    {
+        if (_scheduleFor is not { } device) return;
+        // Days ticked but not yet added are almost certainly meant to be saved too.
+        if (_days.Count > 0)
+        {
+            AddOffTime();
+            if (Issues.Count > 0) return;
+        }
+        if (await SaveAccessAsync(device, a => a.OffTimes = [.. _offTimes])) _scheduleFor = null;
     }
 
     private static void EnsureFixed(FirewallConfig c, Device device)
@@ -86,12 +337,11 @@
 
     private Task ReleaseAsync(Device device) => RunAsync(c => c.Dhcp.Reservations.RemoveAll(r => r.Mac == device.Mac));
 
-    private Task BlockAsync(Device device) => RunAsync(c =>
-    {
-        EnsureFixed(c, device);
-        // Device blocks go first so no later "allow" rule can let the device back out.
-        c.Rules.Insert(0, new FirewallRule { Name = $"Block {device.SafeName}", Source = device.Address });
-    });
-
     private Task UnblockAsync(Device device) => RunAsync(c => c.Rules.RemoveAll(r => FirewallState.IsDeviceBlock(r, device.Address)));
+
+    public override void Dispose()
+    {
+        _cts.Cancel();
+        base.Dispose();
+    }
 }

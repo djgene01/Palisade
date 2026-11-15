@@ -52,6 +52,11 @@
         <p class="mt-1 text-2xl font-bold">@Config.LanAddress</p>
         <p class="text-sm text-muted">Port @Config.LanInterface, @(State.Lan?.IsUp == true ? "cable connected" : "no cable detected")</p>
         <p class="mt-4"><a class="font-bold underline underline-offset-4" href="/devices">@Fmt.Plural(online, "device", "devices") connected</a></p>
+        @{ var offNow = AccessPlan.OffNow(Config.Access, DateTimeOffset.UtcNow, DateTime.Now).Count; }
+        @if (offNow > 0)
+        {
+            <p class="mt-1 text-sm text-muted"><a class="font-bold text-ink underline underline-offset-4" href="/devices">@Fmt.Plural(offNow, "device has", "devices have")</a> the internet switched off right now.</p>
+        }
         <p class="mt-1 text-sm text-muted">Content filter: <a class="font-bold text-ink underline underline-offset-4" href="/filter">@Fmt.FilterLevel(Config.Filter.Level)</a></p>
     </div>
 </section>

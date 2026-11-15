@@ -76,7 +76,7 @@
     <section aria-labelledby="wan-title">
         <h2 id="wan-title" class="text-xl font-bold">Internet side</h2>
         <p class="mt-1 text-muted">
-            Port @Config.WanInterface, address @(State.Wan?.Addresses.FirstOrDefault() ?? "none yet"). Palisade leaves this port's own address to Debian, so change it there if you need to.
+            Port @Config.WanInterface, address @(State.Wan?.Addresses.FirstOrDefault() ?? "none yet"). It gets that address from the equipment it is connected to.
         </p>
 
         <div class="mt-4 flex items-start gap-4">
@@ -102,14 +102,23 @@
             <div>
                 <label for="wan-port" class="field-label">Internet port</label>
                 <select id="wan-port" class="input" @bind="_draft.WanInterface">
-                    @foreach (var name in PortNames) { <option value="@name">@name</option> }
+                    @foreach (var name in PortNames) { <option value="@name">@PortLabel(name)</option> }
                 </select>
+                <p class="field-hint">A cabled internet port asks your provider's equipment for an address by itself.</p>
             </div>
             <div>
                 <label for="lan-port" class="field-label">Home network port</label>
                 <select id="lan-port" class="input" @bind="_draft.LanInterface">
-                    @foreach (var name in PortNames) { <option value="@name">@name</option> }
+                    @foreach (var name in PortNames) { <option value="@name">@PortLabel(name)</option> }
                 </select>
+            </div>
+            <div class="sm:col-span-2">
+                <label for="maint-port" class="field-label">Maintenance port</label>
+                <select id="maint-port" class="input sm:max-w-xs" @bind="_draft.MaintenanceInterface">
+                    <option value="">None</option>
+                    @foreach (var name in PortNames.Append(Config.MaintenanceInterface).Where(n => n.Length > 0).Distinct()) { <option value="@name">@PortLabel(name)</option> }
+                </select>
+                <p class="field-hint">A spare port, usually the Wi-Fi, that can open this page and remote login (SSH) and nothing else. Nothing is passed between it and your network or the internet. Handy as a way in when the other ports are busy or misbehaving.</p>
             </div>
         </div>
     </section>
@@ -123,7 +132,75 @@
     </div>
 </form>
 
+@if (State.Wifi is { Interface.Length: > 0 } wifi)
+{
+    <section aria-labelledby="wifi-title" class="mt-12 max-w-2xl border-t border-line pt-8">
+        <h2 id="wifi-title" class="text-xl font-bold">The firewall's own Wi-Fi</h2>
+        <p class="mt-1 text-muted">
+            @if (wifi.Connected)
+            {
+                <span>Joined to <strong class="text-ink">@wifi.Ssid</strong>@(wifi.Address.Length > 0 ? $", with the address {wifi.Address}" : ", waiting for an address"). </span>
+            }
+            else
+            {
+                <span>Not joined to any Wi-Fi network right now. </span>
+            }
+            <span>Its role is @WifiRole(wifi.Interface).</span>
+        </p>
+
+        <form class="mt-4 space-y-4" @onsubmit="JoinWifiAsync">
+            <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                    <label for="wifi-name" class="field-label">Wi-Fi name</label>
+                    <input id="wifi-name" class="input" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32" @bind="_wifiName" />
+                </div>
+                <div>
+                    <label for="wifi-pass" class="field-label">Wi-Fi password</label>
+                    <input id="wifi-pass" class="input" type="password" autocomplete="new-password" maxlength="63" @bind="_wifiPass" />
+                </div>
+            </div>
+            <p class="field-hint">Joining takes up to half a minute. If the firewall can't get on, it goes back to the Wi-Fi it uses now. If you are reading this page through that Wi-Fi, you will be disconnected: join the new Wi-Fi yourself and open the firewall's page again.</p>
+            <Problems Issues="_wifiIssues" />
+            @if (_wifiDone)
+            {
+                <p role="status" class="rounded-md border border-pine bg-pine-soft p-3 font-semibold">The firewall has joined @State.Wifi?.Ssid.</p>
+            }
+            <button type="submit" class="btn" disabled="@_wifiBusy">@(_wifiBusy ? "Joining, this takes a moment" : "Join this Wi-Fi")</button>
+        </form>
+    </section>
+}
+
 @code {
+    private string _wifiName = "", _wifiPass = "";
+    private bool _wifiBusy, _wifiDone;
+    private IReadOnlyList<ValidationIssue> _wifiIssues = [];
+
+    protected override async Task OnInitializedAsync() => await State.RefreshWifiAsync();
+
+    private string PortLabel(string name) =>
+        State.Status?.Interfaces.FirstOrDefault(i => i.Name == name) is { IsWireless: true } ? $"{name} (Wi-Fi)" : name;
+
+    private string WifiRole(string name) =>
+        name == Config.WanInterface ? "the internet port"
+        : name == Config.LanInterface ? "the home network port"
+        : name == Config.MaintenanceInterface ? "the maintenance port"
+        : "none yet: choose it as the maintenance port above to be able to open this page through it";
+
+    private async Task JoinWifiAsync()
+    {
+        _wifiDone = false;
+        if (_wifiName.Trim().Length == 0)
+        {
+            _wifiIssues = [new("", "Type the name of the Wi-Fi network.")];
+            return;
+        }
+        _wifiBusy = true;
+        _wifiIssues = await State.JoinWifiAsync(_wifiName.Trim(), _wifiPass);
+        _wifiBusy = false;
+        _wifiDone = _wifiIssues.Count == 0;
+        if (_wifiDone) (_wifiName, _wifiPass) = ("", "");
+    }
+
     private FirewallConfig _draft = new();
     private string _dns = "";
     private bool _busy;
@@ -165,6 +242,7 @@
             c.LanPrefix = _draft.LanPrefix;
             c.NatEnabled = _draft.NatEnabled;
             c.AllowManagementFromWan = _draft.AllowManagementFromWan;
+            c.MaintenanceInterface = _draft.MaintenanceInterface;
             c.Dhcp.Enabled = _draft.Dhcp.Enabled;
             c.Dhcp.RangeStart = _draft.Dhcp.RangeStart.Trim();
             c.Dhcp.RangeEnd = _draft.Dhcp.RangeEnd.Trim();

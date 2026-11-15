@@ -59,7 +59,7 @@
             <label for="pf-device" class="field-label">Send it to which device?</label>
             <select id="pf-device" class="input" @bind="_draft.InternalAddress">
                 <option value="">Choose a device</option>
-                @foreach (var device in State.Devices())
+                @foreach (var device in State.Devices().Where(d => d.Address.Length > 0))
                 {
                     <option value="@device.Address">@device.Name (@device.Address)</option>
                 }
@@ -68,7 +68,7 @@
                     <option value="@_draft.InternalAddress">@_draft.InternalAddress</option>
                 }
             </select>
-            @if (State.Devices().Count == 0)
+            @if (State.Devices().All(d => d.Address.Length == 0))
             {
                 <p class="field-hint">No devices have joined your network yet, so there is nothing to choose.</p>
             }

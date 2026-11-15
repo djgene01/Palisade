@@ -76,7 +76,7 @@
                 <label for="rule-device" class="field-label">From which device?</label>
                 <select id="rule-device" class="input" @bind="_draft.Source">
                     <option value="">Every device</option>
-                    @foreach (var device in State.Devices())
+                    @foreach (var device in State.Devices().Where(d => d.Address.Length > 0))
                     {
                         <option value="@device.Address">@device.Name (@device.Address)</option>
                     }
