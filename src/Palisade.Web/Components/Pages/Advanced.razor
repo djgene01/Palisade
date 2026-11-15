@@ -1,0 +1,36 @@
+@page "/advanced"
+@inherits StatePage
+
+<PageTitle>Advanced · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Advanced</h1>
+<p class="mt-2 max-w-2xl text-lg text-muted">For the curious. These are the exact files Palisade writes from your settings. They are shown for checking, not for editing: the next save replaces them.</p>
+
+@{ var files = Render(); }
+@if (files is null)
+{
+    <p role="alert" class="mt-6 max-w-2xl rounded-md border border-brick bg-brick-soft p-4">The current settings could not be turned into files. Open Network and save your settings again.</p>
+}
+else
+{
+    <div class="mt-8 max-w-4xl space-y-8">
+        <section aria-labelledby="nft-title">
+            <h2 id="nft-title" class="text-xl font-bold">Firewall and NAT rules</h2>
+            <p class="field-hint">Written to /etc/nftables.conf and loaded by nftables, in the Linux kernel.</p>
+            <pre tabindex="0" class="mt-3 overflow-x-auto rounded-lg border border-line bg-sunk p-4 text-sm leading-relaxed">@files.Nftables</pre>
+        </section>
+        <section aria-labelledby="dnsmasq-title">
+            <h2 id="dnsmasq-title" class="text-xl font-bold">Automatic addresses and name lookups</h2>
+            <p class="field-hint">Written to /etc/dnsmasq.d/palisade.conf and run by dnsmasq.</p>
+            <pre tabindex="0" class="mt-3 overflow-x-auto rounded-lg border border-line bg-sunk p-4 text-sm leading-relaxed">@files.Dnsmasq</pre>
+        </section>
+    </div>
+}
+
+@code {
+    private GeneratedFiles? Render()
+    {
+        try { return ConfigRenderer.Render(Config); }
+        catch (InvalidOperationException) { return null; }
+    }
+}

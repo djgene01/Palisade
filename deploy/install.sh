@@ -1,0 +1,52 @@
+#!/bin/sh
+# Installs Palisade on a clean Debian 12 or 13 machine. Run as root from the unpacked release folder:
+#   sh install.sh
+# Safe to run again to upgrade: it replaces the programs and keeps your settings.
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Please run this as root (su -, then: sh install.sh)." >&2
+    exit 1
+fi
+
+here="$(cd "$(dirname "$0")" && pwd)"
+for part in agent web; do
+    if [ ! -d "$here/$part" ]; then
+        echo "Missing the '$part' folder next to install.sh. Unpack the whole release first." >&2
+        exit 1
+    fi
+done
+
+echo "Installing nftables and dnsmasq..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -q
+# libicu is what .NET uses for text handling; the package name carries a version number, so match it.
+apt-get install -y -q nftables dnsmasq iproute2 ca-certificates "$(apt-cache --names-only search '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
+
+# dnsmasq must stay quiet until Palisade has been set up, otherwise it would answer on every port.
+systemctl disable --now dnsmasq >/dev/null 2>&1 || true
+
+if ! id palisade >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin palisade
+fi
+
+echo "Copying programs to /opt/palisade..."
+systemctl stop palisade-web palisade-agent 2>/dev/null || true
+mkdir -p /opt/palisade
+rm -rf /opt/palisade/agent /opt/palisade/web
+cp -r "$here/agent" "$here/web" /opt/palisade/
+chown -R root:root /opt/palisade
+chmod 755 /opt/palisade/agent/Palisade.Agent /opt/palisade/web/Palisade.Web
+
+install -m 644 "$here/palisade-agent.service" "$here/palisade-web.service" /etc/systemd/system/
+systemctl daemon-reload
+
+# nftables.service reloads the saved rules at every boot, before and without Palisade's own programs.
+systemctl enable nftables >/dev/null
+systemctl enable --now palisade-agent palisade-web >/dev/null
+
+echo
+echo "Palisade is running. Open one of these in a browser on the same network:"
+ip -4 -o addr show scope global | awk '{split($4, a, "/"); print "  http://" a[1] ":8080   (port " $2 ")"}'
+echo
+echo "Until you finish the setup page, this machine filters nothing."

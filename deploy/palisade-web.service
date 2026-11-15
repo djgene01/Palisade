@@ -1,0 +1,31 @@
+[Unit]
+Description=Palisade web interface
+After=palisade-agent.service
+Wants=palisade-agent.service
+
+[Service]
+Type=simple
+ExecStart=/opt/palisade/web/Palisade.Web
+WorkingDirectory=/opt/palisade/web
+User=palisade
+Group=palisade
+StateDirectory=palisade-web
+StateDirectoryMode=0700
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Restart=on-failure
+RestartSec=3
+
+# The web interface holds no privileges: it can only talk to the agent's socket.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+bin/
+obj/
+node_modules/
+release/
+src/Palisade.Web/data/

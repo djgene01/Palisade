@@ -1,0 +1,59 @@
+@page "/setup"
+@layout AuthLayout
+@attribute [ExcludeFromInteractiveRouting]
+@inject PasswordStore Passwords
+@inject NavigationManager Nav
+
+<PageTitle>Choose a password · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold" tabindex="-1">First, choose a password</h1>
+<p class="mt-2 text-muted">Anyone with this password can change how your network is protected, so pick one you don't use anywhere else. There is no username.</p>
+
+<form method="post" @formname="setup" @onsubmit="SubmitAsync" class="mt-6 space-y-4">
+    <AntiforgeryToken />
+    <div>
+        <label for="password" class="field-label">Password</label>
+        <input id="password" name="Password" type="password" autocomplete="new-password" required minlength="@PasswordStore.MinimumLength" autofocus class="input" aria-describedby="password-hint" />
+        <p id="password-hint" class="field-hint">At least @PasswordStore.MinimumLength characters. A few unrelated words work well.</p>
+    </div>
+    <div>
+        <label for="confirm" class="field-label">Type it again</label>
+        <input id="confirm" name="Confirm" type="password" autocomplete="new-password" required class="input" />
+    </div>
+    @if (_problem is not null)
+    {
+        <p role="alert" class="rounded-md border border-brick bg-brick-soft p-3 font-semibold">@_problem</p>
+    }
+    <button type="submit" class="btn btn-primary w-full">Save password and continue</button>
+</form>
+
+@code {
+    private string? _problem;
+
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private string? Password { get; set; }
+    [SupplyParameterFromForm] private string? Confirm { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (Passwords.HasPassword) Nav.NavigateTo("/login");
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (Passwords.HasPassword) return;
+        if (Password is null || Password.Length < PasswordStore.MinimumLength)
+        {
+            _problem = $"The password needs at least {PasswordStore.MinimumLength} characters.";
+            return;
+        }
+        if (Password != Confirm)
+        {
+            _problem = "The two passwords are not the same. Type them again.";
+            return;
+        }
+        Passwords.Set(Password);
+        await SignIn.AdminAsync(HttpContext);
+        Nav.NavigateTo("/welcome");
+    }
+}

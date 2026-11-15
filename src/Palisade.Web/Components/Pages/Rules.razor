@@ -1,0 +1,197 @@
+@page "/rules"
+@inherits StatePage
+
+<PageTitle>Rules · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Rules</h1>
+<div class="mt-2 max-w-2xl space-y-2 text-lg text-muted">
+    <p>Without any rules, your devices can reach everything on the internet, and nothing on the internet can reach them unless you opened a port.</p>
+    <p>Rules change that for particular devices, addresses or services. They are checked from the top down and the first one that matches decides.</p>
+</div>
+
+<div class="mt-6 max-w-3xl space-y-4">
+    <button type="button" class="btn btn-primary" @onclick="StartNew">Add a rule</button>
+    @if (!_open) { <Problems Issues="Issues" /> }
+
+    @if (Config.Rules.Count == 0)
+    {
+        <div class="panel p-6">
+            <p class="font-bold">You have no rules.</p>
+            <p class="mt-1 text-muted">Add one to stop a device using a service, or to block an address on the internet for everyone at home.</p>
+        </div>
+    }
+    else
+    {
+        <ol class="panel divide-y divide-line">
+            @for (var i = 0; i < Config.Rules.Count; i++)
+            {
+                var rule = Config.Rules[i];
+                var index = i;
+                <li class="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
+                    <Toggle Value="rule.Enabled" ValueChanged="on => SaveAsync(c => c.Rules.First(r => r.Id == rule.Id).Enabled = on)" Label="@($"{rule.Name} is switched on")" />
+                    <div class="min-w-0 flex-1 basis-56">
+                        <p class="text-lg font-bold">
+                            <span class="tag mr-1 @(rule.Action == RuleAction.Block ? "bg-brick-soft text-brick" : "bg-pine-soft text-ink")">@(rule.Action == RuleAction.Block ? "Block" : "Allow")</span>
+                            @rule.Name
+                        </p>
+                        <p class="text-muted">@Describe(rule)</p>
+                        @if (!rule.Enabled) { <p class="mt-1"><span class="tag bg-sunk text-muted">Switched off</span></p> }
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" class="btn" disabled="@(index == 0)" aria-label="@($"Move {rule.Name} up")" @onclick="() => MoveAsync(rule.Id, -1)">Up</button>
+                        <button type="button" class="btn" disabled="@(index == Config.Rules.Count - 1)" aria-label="@($"Move {rule.Name} down")" @onclick="() => MoveAsync(rule.Id, 1)">Down</button>
+                        <button type="button" class="btn btn-danger" @onclick="() => SaveAsync(c => c.Rules.RemoveAll(r => r.Id == rule.Id))">Remove</button>
+                    </div>
+                </li>
+            }
+        </ol>
+    }
+</div>
+
+<Modal Open="_open" Title="Add a rule" OnClose="() => _open = false">
+    <form class="space-y-4" @onsubmit="AddAsync">
+        <div>
+            <label for="rule-name" class="field-label">Name</label>
+            <input id="rule-name" class="input" @bind="_draft.Name" placeholder="A name you will recognise" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label for="rule-action" class="field-label">What should happen?</label>
+                <select id="rule-action" class="input" @bind="_draft.Action">
+                    <option value="@RuleAction.Block">Block it</option>
+                    <option value="@RuleAction.Allow">Allow it</option>
+                </select>
+            </div>
+            <div>
+                <label for="rule-direction" class="field-label">Which way?</label>
+                <select id="rule-direction" class="input" @bind="_draft.Direction">
+                    <option value="@RuleDirection.Outgoing">Going out to the internet</option>
+                    <option value="@RuleDirection.Incoming">Coming in from the internet</option>
+                </select>
+            </div>
+        </div>
+        @if (_draft.Direction == RuleDirection.Outgoing)
+        {
+            <div>
+                <label for="rule-device" class="field-label">From which device?</label>
+                <select id="rule-device" class="input" @bind="_draft.Source">
+                    <option value="">Every device</option>
+                    @foreach (var device in State.Devices())
+                    {
+                        <option value="@device.Address">@device.Name (@device.Address)</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label for="rule-destination" class="field-label">To which internet address? (optional)</label>
+                <input id="rule-destination" class="input" @bind="_draft.Destination" placeholder="Anywhere" />
+                <p class="field-hint">A single address such as 203.0.113.9, or a range such as 203.0.113.0/24.</p>
+            </div>
+        }
+        else
+        {
+            <div>
+                <label for="rule-source" class="field-label">From which internet address? (optional)</label>
+                <input id="rule-source" class="input" @bind="_draft.Source" placeholder="Anywhere" />
+                <p class="field-hint">Incoming rules apply to traffic heading for your opened ports.</p>
+            </div>
+        }
+        <div>
+            <label for="rule-service" class="field-label">Which service?</label>
+            <select id="rule-service" class="input" @bind="_service">
+                @foreach (var service in Services)
+                {
+                    <option value="@service.Key">@service.Label</option>
+                }
+                <option value="custom">Particular ports</option>
+            </select>
+        </div>
+        @if (_service == "custom")
+        {
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label for="rule-ports" class="field-label">Ports</label>
+                    <input id="rule-ports" class="input" @bind="_draft.Ports" placeholder="80, 443 or 8000-8010" />
+                </div>
+                <div>
+                    <label for="rule-proto" class="field-label">Kind of traffic</label>
+                    <select id="rule-proto" class="input" @bind="_draft.Protocol">
+                        <option value="@Protocol.TcpUdp">TCP and UDP</option>
+                        <option value="@Protocol.Tcp">TCP</option>
+                        <option value="@Protocol.Udp">UDP</option>
+                    </select>
+                </div>
+            </div>
+        }
+        <Problems Issues="Issues" />
+        <div class="flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary" disabled="@_busy">Add this rule</button>
+            <button type="button" class="btn" @onclick="() => _open = false">Cancel</button>
+        </div>
+    </form>
+</Modal>
+
+@code {
+    private static readonly (string Key, string Label, Protocol Protocol, string Ports)[] Services =
+    [
+        ("any", "Everything", Protocol.Any, ""),
+        ("web", "Web browsing (ports 80 and 443)", Protocol.TcpUdp, "80, 443"),
+        ("mail", "Sending email (ports 25, 465 and 587)", Protocol.Tcp, "25, 465, 587"),
+        ("dns", "Outside DNS servers (port 53)", Protocol.TcpUdp, "53"),
+        ("ping", "Ping", Protocol.Icmp, ""),
+    ];
+
+    private bool _open, _busy;
+    private FirewallRule _draft = new();
+    private string _service = "any";
+
+    private void StartNew()
+    {
+        _draft = new FirewallRule { Protocol = Protocol.TcpUdp };
+        _service = "any";
+        Issues = [];
+        _open = true;
+    }
+
+    private string Describe(FirewallRule r)
+    {
+        string Who(string address, string anyone) => address.Length == 0 ? anyone
+            : State.Devices().FirstOrDefault(d => d.Address == address) is { } d ? $"{d.Name} ({address})" : address;
+        var what = r.Ports.Length > 0 ? $"ports {r.Ports} ({Fmt.Protocol(r.Protocol)})"
+            : r.Protocol == Protocol.Any ? "everything" : $"all {Fmt.Protocol(r.Protocol)} traffic";
+        return r.Direction == RuleDirection.Outgoing
+            ? $"Going out: {what} from {Who(r.Source, "every device")} to {Who(r.Destination, "anywhere")}"
+            : $"Coming in: {what} from {Who(r.Source, "anywhere")} to {Who(r.Destination, "your opened ports")}";
+    }
+
+    private Task MoveAsync(string id, int by) => SaveAsync(c =>
+    {
+        var from = c.Rules.FindIndex(r => r.Id == id);
+        var to = from + by;
+        if (from < 0 || to < 0 || to >= c.Rules.Count) return;
+        (c.Rules[from], c.Rules[to]) = (c.Rules[to], c.Rules[from]);
+    });
+
+    private async Task AddAsync()
+    {
+        _draft.Name = _draft.Name.Trim();
+        _draft.Source = _draft.Source.Trim();
+        _draft.Destination = _draft.Direction == RuleDirection.Outgoing ? _draft.Destination.Trim() : "";
+        if (Services.FirstOrDefault(s => s.Key == _service) is { Key: not null } service)
+            (_draft.Protocol, _draft.Ports) = (service.Protocol, service.Ports);
+        else if (_draft.Ports.Trim().Length == 0)
+        {
+            Issues = [new("", "Type the ports this rule is about, such as 80, 443.")];
+            return;
+        }
+        if (_draft.Name.Length == 0)
+        {
+            Issues = [new("", "Give the rule a name, so you recognise it later.")];
+            return;
+        }
+        _busy = true;
+        var saved = await SaveAsync(c => c.Rules.Add(_draft));
+        _busy = false;
+        if (saved) _open = false;
+    }
+}

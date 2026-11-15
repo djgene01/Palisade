@@ -1,0 +1,183 @@
+@page "/ports"
+@inherits StatePage
+
+<PageTitle>Open ports · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Open ports</h1>
+<p class="mt-2 max-w-2xl text-lg text-muted">A port is a numbered door. Opening one lets people on the internet reach a single device on your network, for a game server or a camera for example. Every door you don't open here stays shut.</p>
+
+<div class="mt-6 max-w-3xl space-y-4">
+    <button type="button" class="btn btn-primary" @onclick="() => StartNew()">Open a port</button>
+    @if (!_open) { <Problems Issues="Issues" /> }
+
+    @if (Config.PortForwards.Count == 0)
+    {
+        <div class="panel p-6">
+            <p class="font-bold">No ports are open.</p>
+            <p class="mt-1 text-muted">That is the safest setting. Open one only when an app or device tells you it needs a port forwarded.</p>
+        </div>
+    }
+    else
+    {
+        <ul class="panel divide-y divide-line">
+            @foreach (var forward in Config.PortForwards)
+            {
+                <li class="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
+                    <Toggle Value="forward.Enabled" ValueChanged="on => SaveAsync(c => c.PortForwards.First(f => f.Id == forward.Id).Enabled = on)"
+                            Label="@($"{forward.Name} is open")" />
+                    <div class="min-w-0 flex-1 basis-56">
+                        <p class="truncate text-lg font-bold">@forward.Name</p>
+                        <p class="text-muted">
+                            Port @forward.ExternalPort (@Fmt.Protocol(forward.Protocol)) goes to @DeviceName(forward.InternalAddress)@(forward.InternalPort is { } p ? $", port {p}" : "")
+                        </p>
+                        @if (!forward.Enabled) { <p class="mt-1"><span class="tag bg-sunk text-muted">Closed for now</span></p> }
+                    </div>
+                    <button type="button" class="btn btn-danger" @onclick="() => SaveAsync(c => c.PortForwards.RemoveAll(f => f.Id == forward.Id))">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<Modal Open="_open" Title="Open a port" OnClose="() => _open = false">
+    <form class="space-y-4" @onsubmit="AddAsync">
+        <div>
+            <label for="pf-preset" class="field-label">What is it for?</label>
+            <select id="pf-preset" class="input" @onchange="PickPreset">
+                <option value="">Something else</option>
+                @foreach (var preset in Presets)
+                {
+                    <option value="@preset.Name">@preset.Name</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label for="pf-name" class="field-label">Name</label>
+            <input id="pf-name" class="input" @bind="_draft.Name" placeholder="A name you will recognise" />
+        </div>
+        <div>
+            <label for="pf-device" class="field-label">Send it to which device?</label>
+            <select id="pf-device" class="input" @bind="_draft.InternalAddress">
+                <option value="">Choose a device</option>
+                @foreach (var device in State.Devices())
+                {
+                    <option value="@device.Address">@device.Name (@device.Address)</option>
+                }
+                @if (_draft.InternalAddress.Length > 0 && State.Devices().All(d => d.Address != _draft.InternalAddress))
+                {
+                    <option value="@_draft.InternalAddress">@_draft.InternalAddress</option>
+                }
+            </select>
+            @if (State.Devices().Count == 0)
+            {
+                <p class="field-hint">No devices have joined your network yet, so there is nothing to choose.</p>
+            }
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label for="pf-port" class="field-label">Port number</label>
+                <input id="pf-port" class="input" inputmode="numeric" @bind="_draft.ExternalPort" placeholder="1 to 65535" />
+            </div>
+            <div>
+                <label for="pf-proto" class="field-label">Kind of traffic</label>
+                <select id="pf-proto" class="input" @bind="_draft.Protocol">
+                    <option value="@Protocol.Tcp">TCP</option>
+                    <option value="@Protocol.Udp">UDP</option>
+                    <option value="@Protocol.TcpUdp">TCP and UDP</option>
+                </select>
+            </div>
+        </div>
+        <p class="field-hint">A range such as 27000-27010 also works. If the app's instructions don't say TCP or UDP, choose both.</p>
+        <div>
+            <label for="pf-internal" class="field-label">Port on the device (optional)</label>
+            <input id="pf-internal" class="input" inputmode="numeric" @bind="_internalPort" placeholder="Same as the port number" />
+        </div>
+        <Problems Issues="Issues" />
+        <div class="flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary" disabled="@_busy">Open this port</button>
+            <button type="button" class="btn" @onclick="() => _open = false">Cancel</button>
+        </div>
+    </form>
+</Modal>
+
+@code {
+    private static readonly (string Name, string Port, Protocol Protocol)[] Presets =
+    [
+        ("Website (HTTP)", "80", Protocol.Tcp), ("Secure website (HTTPS)", "443", Protocol.Tcp),
+        ("Minecraft Java server", "25565", Protocol.Tcp), ("Plex media server", "32400", Protocol.Tcp),
+        ("WireGuard VPN", "51820", Protocol.Udp), ("Remote Desktop", "3389", Protocol.TcpUdp),
+    ];
+
+    private bool _open, _busy;
+    private PortForward _draft = new();
+    private string _internalPort = "";
+
+    [SupplyParameterFromQuery(Name = "device")] private string? DeviceQuery { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Arriving from "Open a port" on the Devices page starts the form with that device chosen.
+        if (DeviceQuery == _handledQuery) return;
+        _handledQuery = DeviceQuery;
+        if (DeviceQuery is { Length: > 0 } address && Ip4.TryParse(address, out _)) StartNew(address);
+    }
+
+    private string? _handledQuery;
+
+    private void StartNew(string address = "")
+    {
+        _draft = new PortForward { InternalAddress = address };
+        _internalPort = "";
+        Issues = [];
+        _open = true;
+    }
+
+    private void PickPreset(ChangeEventArgs e)
+    {
+        var preset = Presets.FirstOrDefault(p => p.Name == (string?)e.Value);
+        if (preset.Name is null) return;
+        (_draft.Name, _draft.ExternalPort, _draft.Protocol) = (preset.Name.Replace("(", "").Replace(")", ""), preset.Port, preset.Protocol);
+    }
+
+    private string DeviceName(string address) =>
+        State.Devices().FirstOrDefault(d => d.Address == address) is { } device ? $"{device.Name} ({address})" : address;
+
+    private async Task AddAsync()
+    {
+        _draft.Name = _draft.Name.Trim();
+        _draft.ExternalPort = _draft.ExternalPort.Replace(" ", "");
+        if (_internalPort.Trim().Length == 0) _draft.InternalPort = null;
+        else if (int.TryParse(_internalPort.Trim(), out var port)) _draft.InternalPort = port;
+        else
+        {
+            Issues = [new("", "The port on the device must be a number from 1 to 65535.")];
+            return;
+        }
+        if (_draft.Name.Length == 0)
+        {
+            Issues = [new("", "Give the open port a name, so you recognise it later.")];
+            return;
+        }
+        if (_draft.ExternalPort.Length == 0)
+        {
+            Issues = [new("", "Type the port number the app or device asked for.")];
+            return;
+        }
+        if (_draft.InternalAddress.Length == 0)
+        {
+            Issues = [new("", "Choose which device the port should go to.")];
+            return;
+        }
+        _busy = true;
+        var device = State.Devices().FirstOrDefault(d => d.Address == _draft.InternalAddress);
+        var saved = await SaveAsync(c =>
+        {
+            c.PortForwards.Add(_draft);
+            // Pin the device's address, otherwise the open port could end up pointing at a different device later.
+            if (device is { Reservation: null })
+                c.Dhcp.Reservations.Add(new Reservation { Name = device.SafeName, Mac = device.Mac, Address = device.Address });
+        });
+        _busy = false;
+        if (saved) _open = false;
+    }
+}

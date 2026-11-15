@@ -1,0 +1,150 @@
+@import "tailwindcss";
+@source "../Components";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Atkinson Hyperlegible was drawn so letters are hard to confuse (0/O, 1/l/I).
+   That matters when ordinary people read addresses and port numbers. Self-hosted: a firewall must work offline. */
+@font-face {
+    font-family: "Atkinson Hyperlegible Next";
+    font-style: normal;
+    font-weight: 200 800;
+    font-display: swap;
+    src: url("/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2");
+}
+
+/* Palette: warm paper and pine green (a timber wall), one ochre accent kept for "needs you" moments,
+   brick red only for blocking and danger. Text pairings measure 5.5:1 or better in both themes; input borders use the muted tone to clear 3:1. */
+:root {
+    --paper: #f6f3ec;
+    --surface: #fffdf8;
+    --sunk: #ebe6da;
+    --line: #cfc7b6;
+    --ink: #1b2721;
+    --muted: #4f5d55;
+    --pine: #1f5c43;
+    --on-pine: #ffffff;
+    --pine-soft: #dcebe2;
+    --ochre: #8f4706;
+    --ochre-soft: #fbe9cf;
+    --brick: #9f2a1e;
+    --brick-soft: #f8dfda;
+}
+
+.dark {
+    --paper: #121815;
+    --surface: #1a221e;
+    --sunk: #0c110f;
+    --line: #36443d;
+    --ink: #e9efe9;
+    --muted: #a6b4ab;
+    --pine: #7fd1a5;
+    --on-pine: #0c1f16;
+    --pine-soft: #1d3a2d;
+    --ochre: #f0b45e;
+    --ochre-soft: #3a2a10;
+    --brick: #f2978c;
+    --brick-soft: #41201c;
+}
+
+@theme inline {
+    --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    --color-paper: var(--paper);
+    --color-surface: var(--surface);
+    --color-sunk: var(--sunk);
+    --color-line: var(--line);
+    --color-ink: var(--ink);
+    --color-muted: var(--muted);
+    --color-pine: var(--pine);
+    --color-on-pine: var(--on-pine);
+    --color-pine-soft: var(--pine-soft);
+    --color-ochre: var(--ochre);
+    --color-ochre-soft: var(--ochre-soft);
+    --color-brick: var(--brick);
+    --color-brick-soft: var(--brick-soft);
+}
+
+@layer base {
+    html {
+        color-scheme: light;
+    }
+
+    html.dark {
+        color-scheme: dark;
+    }
+
+    body {
+        @apply bg-paper font-sans text-ink antialiased;
+    }
+
+    :focus-visible {
+        outline: 2px solid var(--pine);
+        outline-offset: 2px;
+    }
+
+    /* Blazor moves focus to the page heading after each navigation so screen readers announce the new page.
+       A heading is not a control, so the focus ring it picked up was only a visual glitch. */
+    h1[tabindex="-1"]:focus {
+        outline: none;
+    }
+}
+
+@layer components {
+    .btn {
+        @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-line bg-surface px-4 text-base font-semibold text-ink transition-colors hover:bg-sunk disabled:cursor-not-allowed disabled:opacity-60;
+    }
+
+    .btn-primary {
+        @apply border-pine bg-pine text-on-pine hover:bg-pine hover:brightness-110;
+    }
+
+    .btn-danger {
+        @apply border-brick text-brick hover:bg-brick-soft;
+    }
+
+    .btn-quiet {
+        @apply border-transparent bg-transparent text-pine underline-offset-4 hover:bg-pine-soft hover:underline;
+    }
+
+    .field-label {
+        @apply mb-1 block font-semibold;
+    }
+
+    .field-hint {
+        @apply mt-1 text-sm text-muted;
+    }
+
+    .input {
+        @apply block min-h-11 w-full rounded-md border border-muted bg-surface px-3 text-base text-ink placeholder:text-muted;
+    }
+
+    .panel {
+        @apply rounded-lg border border-line bg-surface;
+    }
+
+    .tag {
+        @apply inline-flex items-center rounded px-2 py-0.5 text-sm font-semibold;
+    }
+}
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 60;
+    padding: 0.75rem 1rem;
+    background: var(--brick-soft);
+    color: var(--ink);
+    border-top: 2px solid var(--brick);
+}
+
+#blazor-error-ui .reload {
+    font-weight: 600;
+    text-decoration: underline;
+    margin-left: 0.5rem;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    float: right;
+}

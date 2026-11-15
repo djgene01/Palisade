@@ -1,0 +1,48 @@
+@page "/login"
+@layout AuthLayout
+@attribute [ExcludeFromInteractiveRouting]
+@inject PasswordStore Passwords
+@inject NavigationManager Nav
+
+<PageTitle>Sign in · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold" tabindex="-1">Sign in</h1>
+<p class="mt-2 text-muted">Enter the password you chose when you set up this firewall.</p>
+
+<form method="post" @formname="login" @onsubmit="SubmitAsync" class="mt-6 space-y-4">
+    <AntiforgeryToken />
+    <div>
+        <label for="password" class="field-label">Password</label>
+        <input id="password" name="Password" type="password" autocomplete="current-password" required autofocus class="input" />
+    </div>
+    @if (_failed)
+    {
+        <p role="alert" class="rounded-md border border-brick bg-brick-soft p-3 font-semibold">That password is not right. Try again.</p>
+    }
+    <button type="submit" class="btn btn-primary w-full">Sign in</button>
+</form>
+
+@code {
+    private bool _failed;
+
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private string? Password { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (!Passwords.HasPassword) Nav.NavigateTo("/setup");
+        else if (HttpContext.User.Identity?.IsAuthenticated == true) Nav.NavigateTo("/");
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (!Passwords.HasPassword) return;
+        if (!string.IsNullOrEmpty(Password) && await Passwords.VerifyAsync(Password))
+        {
+            await SignIn.AdminAsync(HttpContext);
+            Nav.NavigateTo("/");
+            return;
+        }
+        _failed = true;
+    }
+}

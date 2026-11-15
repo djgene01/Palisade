@@ -1,0 +1,173 @@
+@page "/network"
+@inherits StatePage
+
+<PageTitle>Network · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Network</h1>
+<p class="mt-2 max-w-2xl text-lg text-muted">How the firewall connects to the internet and to your devices. Changes here are tested before they are kept, and undone by themselves if they cut you off.</p>
+
+<form class="mt-8 max-w-2xl space-y-10" @onsubmit="SaveAllAsync">
+    <section aria-labelledby="lan-title">
+        <h2 id="lan-title" class="text-xl font-bold">Your network</h2>
+        <div class="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+                <label for="lan-address" class="field-label">Firewall address</label>
+                <input id="lan-address" class="input" inputmode="decimal" value="@_draft.LanAddress" @onchange="OnLanAddressChanged" />
+                <p class="field-hint">Devices use this address to reach the internet and this page.</p>
+            </div>
+            <div>
+                <label for="lan-size" class="field-label">Network size</label>
+                <select id="lan-size" class="input" @bind="_draft.LanPrefix">
+                    <option value="24">Up to 253 devices (/24)</option>
+                    <option value="23">Up to 509 devices (/23)</option>
+                    <option value="22">Up to 1021 devices (/22)</option>
+                    <option value="16">Up to 65,533 devices (/16)</option>
+                    @if (_draft.LanPrefix is not (24 or 23 or 22 or 16))
+                    {
+                        <option value="@_draft.LanPrefix">/@_draft.LanPrefix</option>
+                    }
+                </select>
+            </div>
+        </div>
+        @if (_draft.LanAddress != Config.LanAddress)
+        {
+            <p class="mt-3 rounded-md border border-ochre bg-ochre-soft p-3">
+                After saving, this page moves to <strong>http://@_draft.LanAddress:@PalisadeDefaults.WebPort</strong>. Reconnect your device, open that address and sign in within @PalisadeDefaults.ConfirmSeconds seconds, or the old address comes back.
+            </p>
+        }
+    </section>
+
+    <section aria-labelledby="dhcp-title">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <h2 id="dhcp-title" class="text-xl font-bold">Automatic addresses</h2>
+                <p class="field-hint">Gives each device that joins an address, so nobody has to set one up by hand. Also called DHCP.</p>
+            </div>
+            <Toggle @bind-Value="_draft.Dhcp.Enabled" Label="Hand out addresses automatically" />
+        </div>
+        @if (_draft.Dhcp.Enabled)
+        {
+            <div class="mt-4 grid gap-4 sm:grid-cols-3">
+                <div>
+                    <label for="dhcp-start" class="field-label">First address</label>
+                    <input id="dhcp-start" class="input" inputmode="decimal" @bind="_draft.Dhcp.RangeStart" />
+                </div>
+                <div>
+                    <label for="dhcp-end" class="field-label">Last address</label>
+                    <input id="dhcp-end" class="input" inputmode="decimal" @bind="_draft.Dhcp.RangeEnd" />
+                </div>
+                <div>
+                    <label for="dhcp-hours" class="field-label">Lend for (hours)</label>
+                    <input id="dhcp-hours" class="input" type="number" min="1" max="720" @bind="_draft.Dhcp.LeaseHours" />
+                </div>
+            </div>
+        }
+        <div class="mt-4">
+            <label for="dns" class="field-label">Name servers (DNS)</label>
+            <input id="dns" class="input" @bind="_dns" />
+            <p class="field-hint">Where the firewall looks up website names for your devices. Separate addresses with commas. Leave empty to use whatever the internet side provides.</p>
+        </div>
+    </section>
+
+    <section aria-labelledby="wan-title">
+        <h2 id="wan-title" class="text-xl font-bold">Internet side</h2>
+        <p class="mt-1 text-muted">
+            Port @Config.WanInterface, address @(State.Wan?.Addresses.FirstOrDefault() ?? "none yet"). Palisade leaves this port's own address to Debian, so change it there if you need to.
+        </p>
+
+        <div class="mt-4 flex items-start gap-4">
+            <Toggle @bind-Value="_draft.NatEnabled" Label="Share one internet address between all devices" />
+            <div>
+                <p class="font-bold">Share one internet address between all devices</p>
+                <p class="text-muted">Also called NAT. Leave this on unless the router upstream has been told a route to your network.</p>
+            </div>
+        </div>
+
+        <div class="mt-4 flex items-start gap-4">
+            <Toggle @bind-Value="_draft.AllowManagementFromWan" Label="Allow managing the firewall from the internet side" />
+            <div>
+                <p class="font-bold">Allow managing the firewall from the internet side</p>
+                <p class="text-muted">Opens this page and remote login (SSH) to the internet side. Useful in a test lab, risky on a real internet connection.</p>
+            </div>
+        </div>
+    </section>
+
+    <section aria-labelledby="ports-title">
+        <h2 id="ports-title" class="text-xl font-bold">Which port is which</h2>
+        <div class="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+                <label for="wan-port" class="field-label">Internet port</label>
+                <select id="wan-port" class="input" @bind="_draft.WanInterface">
+                    @foreach (var name in PortNames) { <option value="@name">@name</option> }
+                </select>
+            </div>
+            <div>
+                <label for="lan-port" class="field-label">Home network port</label>
+                <select id="lan-port" class="input" @bind="_draft.LanInterface">
+                    @foreach (var name in PortNames) { <option value="@name">@name</option> }
+                </select>
+            </div>
+        </div>
+    </section>
+
+    <div class="space-y-4">
+        <Problems Issues="Issues" />
+        <div class="flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary" disabled="@_busy">Save network settings</button>
+            <button type="button" class="btn" @onclick="Reset">Discard changes</button>
+        </div>
+    </div>
+</form>
+
+@code {
+    private FirewallConfig _draft = new();
+    private string _dns = "";
+    private bool _busy;
+
+    private IEnumerable<string> PortNames =>
+        (State.Status?.Interfaces.Select(i => i.Name) ?? []).Append(Config.WanInterface).Append(Config.LanInterface).Distinct();
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Reset();
+    }
+
+    private void Reset()
+    {
+        _draft = Config.Clone();
+        _dns = string.Join(", ", _draft.Dhcp.UpstreamDns);
+        Issues = [];
+    }
+
+    private void OnLanAddressChanged(ChangeEventArgs e)
+    {
+        _draft.LanAddress = ((string?)e.Value ?? "").Trim();
+        // Moving to a different range would strand the old automatic addresses, so move them along.
+        if (Ip4.TryParse(_draft.LanAddress, out var lan)
+            && !(Ip4.TryParse(_draft.Dhcp.RangeStart, out var start) && start.IsIn(lan, _draft.LanPrefix) && start.Value > lan.Value))
+            (_draft.Dhcp.RangeStart, _draft.Dhcp.RangeEnd) = Fmt.SuggestRange(lan, _draft.LanPrefix);
+    }
+
+    private async Task SaveAllAsync()
+    {
+        _busy = true;
+        var dns = _dns.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+        var saved = await SaveAsync(c =>
+        {
+            c.WanInterface = _draft.WanInterface;
+            c.LanInterface = _draft.LanInterface;
+            c.LanAddress = _draft.LanAddress;
+            c.LanPrefix = _draft.LanPrefix;
+            c.NatEnabled = _draft.NatEnabled;
+            c.AllowManagementFromWan = _draft.AllowManagementFromWan;
+            c.Dhcp.Enabled = _draft.Dhcp.Enabled;
+            c.Dhcp.RangeStart = _draft.Dhcp.RangeStart.Trim();
+            c.Dhcp.RangeEnd = _draft.Dhcp.RangeEnd.Trim();
+            c.Dhcp.LeaseHours = _draft.Dhcp.LeaseHours;
+            c.Dhcp.UpstreamDns = dns;
+        });
+        _busy = false;
+        if (saved) Reset();
+    }
+}

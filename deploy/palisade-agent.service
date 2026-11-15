@@ -1,0 +1,19 @@
+[Unit]
+Description=Palisade firewall agent (applies network configuration)
+After=network.target nftables.service
+Wants=nftables.service
+
+[Service]
+Type=simple
+ExecStart=/opt/palisade/agent/Palisade.Agent
+WorkingDirectory=/opt/palisade/agent
+User=root
+RuntimeDirectory=palisade
+RuntimeDirectoryMode=0755
+StateDirectory=palisade
+Environment=DOTNET_ENVIRONMENT=Production
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

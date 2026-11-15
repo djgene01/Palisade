@@ -1,0 +1,165 @@
+@page "/"
+@inherits StatePage
+@using System.Globalization
+
+<PageTitle>Overview · Palisade</PageTitle>
+
+@{
+    var status = State.Status;
+    var protectedNow = status?.FirewallActive == true;
+    var devices = State.Devices();
+    var online = devices.Count(d => d.Online);
+    var openPorts = Config.PortForwards.Count(f => f.Enabled);
+    var rules = Config.Rules.Count(r => r.Enabled);
+    var attention = Attention().ToList();
+}
+
+<h1 class="text-4xl font-extrabold leading-tight md:text-5xl" tabindex="-1">
+    @(status is null ? "Checking your network" : protectedNow ? "Your network is protected." : "Protection is off.")
+</h1>
+<p class="mt-3 text-lg text-muted">
+    @if (status is not null)
+    {
+        <span>@(status.InternetReachable ? "The internet is reachable." : "The internet is not reachable right now.") </span>
+        <span>@(online == 0 ? "No devices are connected." : $"{Fmt.Plural(online, "device is", "devices are")} connected.")</span>
+    }
+</p>
+
+@* The wall itself: internet on one side, the home network on the other, and what is let through in between. *@
+<section aria-label="How traffic passes the firewall" class="panel mt-8 grid gap-0 overflow-hidden md:grid-cols-[1fr_auto_1fr]">
+    <div class="p-5">
+        <h2 class="font-bold text-muted">Internet side</h2>
+        <p class="mt-1 text-2xl font-bold">@(State.Wan?.Addresses.FirstOrDefault()?.Split('/')[0] ?? "No address")</p>
+        <p class="text-sm text-muted">Port @Config.WanInterface, @(State.Wan?.IsUp == true ? "cable connected" : "no cable detected")</p>
+        <dl class="mt-4 flex gap-6">
+            <div><dt class="text-sm text-muted">Coming in</dt><dd class="whitespace-nowrap text-lg font-bold">@Fmt.Rate(_downRate)</dd></div>
+            <div><dt class="text-sm text-muted">Going out</dt><dd class="whitespace-nowrap text-lg font-bold">@Fmt.Rate(_upRate)</dd></div>
+        </dl>
+    </div>
+
+    <div class="flex items-center gap-4 border-y border-line bg-sunk p-5 md:w-64 md:flex-col md:justify-center md:border-x md:border-y-0 md:text-center">
+        <Stakes Count="7" Class="@($"h-12 shrink-0 {(protectedNow ? "text-pine" : "text-muted")}")" />
+        <p>
+            <a class="font-bold underline underline-offset-4" href="/ports">@Fmt.Plural(openPorts, "open port", "open ports")</a>
+            <span class="text-muted">and</span>
+            <a class="font-bold underline underline-offset-4" href="/rules">@Fmt.Plural(rules, "rule", "rules")</a>
+            <span class="block text-sm text-muted">Everything else from the internet is turned away.</span>
+        </p>
+    </div>
+
+    <div class="p-5">
+        <h2 class="font-bold text-muted">Your network</h2>
+        <p class="mt-1 text-2xl font-bold">@Config.LanAddress</p>
+        <p class="text-sm text-muted">Port @Config.LanInterface, @(State.Lan?.IsUp == true ? "cable connected" : "no cable detected")</p>
+        <p class="mt-4"><a class="font-bold underline underline-offset-4" href="/devices">@Fmt.Plural(online, "device", "devices") connected</a></p>
+    </div>
+</section>
+
+<div class="mt-8 grid gap-8 lg:grid-cols-[3fr_2fr]">
+    <section aria-labelledby="traffic-title">
+        <h2 id="traffic-title" class="text-xl font-bold">Internet traffic over the last two minutes</h2>
+        @if (_samples.Count < 2)
+        {
+            <p class="mt-3 text-muted" role="status">Measuring. The chart appears after a few seconds.</p>
+        }
+        else
+        {
+            var max = Math.Max(1, _samples.Max(s => Math.Max(s.Down, s.Up)));
+            <svg viewBox="0 0 600 140" class="mt-3 w-full" role="img" aria-label="@($"Traffic chart. Peak {Fmt.Rate(max)}.")" preserveAspectRatio="none">
+                <line x1="0" y1="139" x2="600" y2="139" stroke="var(--line)" stroke-width="1" />
+                <polyline fill="none" stroke="var(--pine)" stroke-width="2.5" stroke-linejoin="round" points="@Points(s => s.Down, max)" />
+                <polyline fill="none" stroke="var(--ochre)" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round" points="@Points(s => s.Up, max)" />
+            </svg>
+            <p class="mt-2 flex flex-wrap gap-x-6 text-sm text-muted">
+                <span><span class="mr-1 inline-block h-0.5 w-5 bg-pine align-middle"></span>Coming in</span>
+                <span><span class="mr-1 inline-block w-5 border-t-2 border-dashed border-ochre align-middle"></span>Going out</span>
+                <span>Peak @Fmt.Rate(max)</span>
+            </p>
+        }
+    </section>
+
+    <section aria-labelledby="attention-title">
+        <h2 id="attention-title" class="text-xl font-bold">Needs your attention</h2>
+        @if (attention.Count == 0)
+        {
+            <p class="mt-3 text-muted">Nothing right now. Palisade will list problems here when it finds them.</p>
+        }
+        else
+        {
+            <ul class="mt-3 space-y-3">
+                @foreach (var (text, href, link) in attention)
+                {
+                    <li class="rounded-md border border-ochre bg-ochre-soft p-3">
+                        @text <a class="font-bold underline underline-offset-4" href="@href">@link</a>
+                    </li>
+                }
+            </ul>
+        }
+        @if (status is not null)
+        {
+            <p class="mt-6 text-sm text-muted">@status.Hostname has been running for @Fmt.Uptime(status.UptimeSeconds).</p>
+        }
+    </section>
+</div>
+
+@code {
+    private readonly List<(double Down, double Up)> _samples = [];
+    private (long Rx, long Tx, DateTimeOffset At)? _last;
+    private double _downRate, _upRate;
+    private CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        _ = PollAsync(_cts.Token);
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            do
+            {
+                await State.RefreshStatusAsync();
+                if (State.Wan is { } wan)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    if (_last is { } last && (now - last.At).TotalSeconds > 0.2)
+                    {
+                        var seconds = (now - last.At).TotalSeconds;
+                        _downRate = Math.Max(0, (wan.RxBytes - last.Rx) / seconds);
+                        _upRate = Math.Max(0, (wan.TxBytes - last.Tx) / seconds);
+                        _samples.Add((_downRate, _upRate));
+                        if (_samples.Count > 60) _samples.RemoveAt(0);
+                    }
+                    _last = (wan.RxBytes, wan.TxBytes, now);
+                }
+                await InvokeAsync(StateHasChanged);
+            }
+            while (await timer.WaitForNextTickAsync(ct));
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private string Points(Func<(double Down, double Up), double> pick, double max) =>
+        string.Join(' ', _samples.Select((s, i) => string.Create(CultureInfo.InvariantCulture,
+            $"{i * 600.0 / 59:0.#},{136 - pick(s) / max * 130:0.#}")));
+
+    private IEnumerable<(string Text, string Href, string Link)> Attention()
+    {
+        if (State.Status is not { } s) yield break;
+        if (!s.FirewallActive) yield return ("The firewall rules are not loaded, so nothing is being filtered.", "/network", "Save your network settings again to reload them");
+        if (!s.InternetReachable) yield return ("The firewall can't reach the internet. Check the cable on the internet port.", "/network", "See network settings");
+        if (State.Wan is { IsUp: false }) yield return ($"No cable is detected on the internet port ({Config.WanInterface}).", "/network", "See network settings");
+        if (Config.Dhcp.Enabled && !s.DhcpRunning) yield return ("Automatic addresses are switched on, but the service that hands them out has stopped.", "/network", "See network settings");
+        if (!Config.Dhcp.Enabled) yield return ("Automatic addresses are off, so new devices must be set up by hand.", "/network", "Turn them on");
+        if (Config.AllowManagementFromWan) yield return ("This firewall can be managed from the internet side. That is fine in a test lab and risky anywhere else.", "/network", "Review this setting");
+    }
+
+    public override void Dispose()
+    {
+        _cts.Cancel();
+        base.Dispose();
+    }
+}

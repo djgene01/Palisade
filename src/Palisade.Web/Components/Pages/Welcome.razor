@@ -1,0 +1,164 @@
+@page "/welcome"
+@inherits StatePage
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Set up · Palisade</PageTitle>
+
+<div class="max-w-2xl">
+    <h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Let's put up the wall</h1>
+    <p class="mt-2 text-lg text-muted">Three questions, then your network is protected. Nothing changes until you press the button at the bottom.</p>
+
+    @if (_ports.Count < 2)
+    {
+        <div role="alert" class="panel mt-8 border-brick p-5">
+            <p class="font-bold">This machine needs two network ports.</p>
+            <p class="mt-1">Palisade found @Fmt.Plural(_ports.Count, "port", "ports"). One port connects to the internet and the other to your devices. Add a second network card, then load this page again.</p>
+        </div>
+    }
+    else
+    {
+        <ol class="mt-8 space-y-10">
+            <li>
+                <fieldset>
+                    <legend class="text-xl font-bold">1. Which port goes to the internet?</legend>
+                    <p class="field-hint">This is the cable that runs to your modem or upstream router.</p>
+                    <div class="mt-3 space-y-2">
+                        @foreach (var port in _ports)
+                        {
+                            <label class="panel flex min-h-14 cursor-pointer items-center gap-3 p-3 @(_wan == port.Name ? "border-pine bg-pine-soft" : "")">
+                                <input type="radio" name="wan" class="h-5 w-5 accent-pine" checked="@(_wan == port.Name)" @onchange="() => PickWan(port.Name)" />
+                                <span>
+                                    <span class="font-bold">@port.Name</span>
+                                    <span class="block text-sm text-muted">@Describe(port)</span>
+                                </span>
+                            </label>
+                        }
+                    </div>
+                </fieldset>
+            </li>
+
+            <li>
+                <fieldset>
+                    <legend class="text-xl font-bold">2. Which port do your devices plug into?</legend>
+                    <p class="field-hint">Usually a cable to a switch or a Wi-Fi access point.</p>
+                    <div class="mt-3 space-y-2">
+                        @foreach (var port in _ports.Where(p => p.Name != _wan))
+                        {
+                            <label class="panel flex min-h-14 cursor-pointer items-center gap-3 p-3 @(_lan == port.Name ? "border-pine bg-pine-soft" : "")">
+                                <input type="radio" name="lan" class="h-5 w-5 accent-pine" checked="@(_lan == port.Name)" @onchange="() => _lan = port.Name" />
+                                <span>
+                                    <span class="font-bold">@port.Name</span>
+                                    <span class="block text-sm text-muted">@Describe(port)</span>
+                                </span>
+                            </label>
+                        }
+                    </div>
+                </fieldset>
+            </li>
+
+            <li>
+                <h2 class="text-xl font-bold">3. What address should the firewall use on your network?</h2>
+                <p class="field-hint">Your devices will get addresses next to this one automatically. The suggestion works for most homes.</p>
+                <div class="mt-3 max-w-xs">
+                    <label for="lan-address" class="field-label">Firewall address</label>
+                    <input id="lan-address" class="input" inputmode="decimal" @bind="_lanAddress" @bind:event="oninput" />
+                </div>
+                @if (OverlapsWan)
+                {
+                    <p role="alert" class="mt-3 rounded-md border border-ochre bg-ochre-soft p-3">
+                        That address is in the same range as the internet side (@WanAddress). The two sides must use different ranges or traffic can't find its way. Try 192.168.60.1.
+                    </p>
+                }
+            </li>
+        </ol>
+
+        <div class="panel mt-10 flex items-start gap-4 p-4 @(_clientOnWanSide ? "border-ochre" : "")">
+            <Toggle @bind-Value="_manageFromWan" Label="Allow managing the firewall from the internet side" />
+            <div>
+                <p class="font-bold">Allow managing the firewall from the internet side</p>
+                @if (_clientOnWanSide)
+                {
+                    <p class="mt-1">You are connected from @_clientAddress, which is on the internet side. Leave this on, or this page will stop working for you as soon as protection starts.</p>
+                }
+                else
+                {
+                    <p class="mt-1 text-muted">Leave this off unless the internet side is a network you trust, such as a test lab.</p>
+                }
+            </div>
+        </div>
+
+        <div class="mt-6 space-y-4">
+            <Problems Issues="Issues" />
+            <button type="button" class="btn btn-primary px-6 text-lg" disabled="@(_busy || OverlapsWan)" @onclick="StartAsync">
+                @(_busy ? "Starting protection" : "Turn on protection")
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    private List<InterfaceStatus> _ports = [];
+    private string _wan = "", _lan = "", _lanAddress = "192.168.50.1";
+    private string _clientAddress = "";
+    private bool _manageFromWan, _clientOnWanSide, _busy;
+
+    private string? WanAddress => _ports.FirstOrDefault(p => p.Name == _wan)?.Addresses.FirstOrDefault();
+
+    private bool OverlapsWan =>
+        Ip4.TryParse(_lanAddress, out var lan) && AddressSpec.TryParseCidr(WanAddress, out var wan, out var prefix)
+        && (lan.IsIn(wan, Math.Min(prefix, 24)) || wan.IsIn(lan, 24));
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        if (Config.SetupComplete)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+        _ports = State.Status?.Interfaces ?? [];
+        // The port that already has an address is almost always the one Debian set up for the internet.
+        _wan = (_ports.FirstOrDefault(p => p.IsUp && p.Addresses.Count > 0) ?? _ports.FirstOrDefault(p => p.Addresses.Count > 0) ?? _ports.FirstOrDefault())?.Name ?? "";
+        PickWan(_wan);
+        if (OverlapsWan) _lanAddress = "192.168.60.1";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _clientAddress = await JS.InvokeAsync<string>("palisade.whoAmI");
+        // Before setup the home network has no addresses yet, so a visitor inside the internet-side range came in that way.
+        _clientOnWanSide = Ip4.TryParse(_clientAddress, out var client)
+            && AddressSpec.TryParseCidr(WanAddress, out var wan, out var prefix) && client.IsIn(wan, prefix);
+        if (_clientOnWanSide) _manageFromWan = true;
+        StateHasChanged();
+    }
+
+    private void PickWan(string name)
+    {
+        _wan = name;
+        if (_lan == name || _lan.Length == 0) _lan = _ports.FirstOrDefault(p => p.Name != name)?.Name ?? "";
+    }
+
+    private static string Describe(InterfaceStatus port) =>
+        (port.IsUp ? "Cable connected" : "No cable detected")
+        + (port.Addresses.Count > 0 ? $", already has the address {port.Addresses[0]}" : ", no address yet");
+
+    private async Task StartAsync()
+    {
+        _busy = true;
+        var saved = await SaveAsync(c =>
+        {
+            c.WanInterface = _wan;
+            c.LanInterface = _lan;
+            c.LanAddress = _lanAddress.Trim();
+            c.LanPrefix = 24;
+            c.AllowManagementFromWan = _manageFromWan;
+            if (Ip4.TryParse(c.LanAddress, out var lan))
+                (c.Dhcp.RangeStart, c.Dhcp.RangeEnd) = Fmt.SuggestRange(lan, 24);
+        });
+        _busy = false;
+        if (saved) Nav.NavigateTo("/");
+    }
+}

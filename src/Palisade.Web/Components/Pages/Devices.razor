@@ -1,0 +1,96 @@
+@page "/devices"
+@inherits StatePage
+
+<PageTitle>Devices · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Devices</h1>
+<p class="mt-2 max-w-2xl text-lg text-muted">Everything that has joined your network. Block a device to cut it off from the internet, or give it a fixed address so opened ports keep pointing at it.</p>
+
+<div class="mt-6 max-w-3xl space-y-4">
+    <Problems Issues="Issues" />
+
+    @{ var devices = State.Devices(); }
+    @if (devices.Count == 0)
+    {
+        <div class="panel p-6">
+            <p class="font-bold">No devices have joined yet.</p>
+            @if (Config.Dhcp.Enabled)
+            {
+                <p class="mt-1 text-muted">Plug a device into the home network port (@Config.LanInterface), or into a switch or Wi-Fi access point connected to it. It shows up here within a few seconds.</p>
+            }
+            else
+            {
+                <p class="mt-1 text-muted">Automatic addresses are off, so Palisade can't see devices join. <a class="font-bold text-pine underline underline-offset-4" href="/network">Turn them on in Network.</a></p>
+            }
+        </div>
+    }
+    else
+    {
+        <ul class="panel divide-y divide-line">
+            @foreach (var device in devices)
+            {
+                <li class="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
+                    <div class="min-w-0 flex-1 basis-56">
+                        <p class="truncate text-lg font-bold">@device.Name</p>
+                        <p class="text-sm text-muted">@device.Address · @device.Mac</p>
+                        <p class="mt-1 flex flex-wrap gap-2">
+                            @if (!device.Online) { <span class="tag bg-sunk text-muted">Not connected now</span> }
+                            @if (device.Reservation is not null) { <span class="tag bg-pine-soft text-ink">Fixed address</span> }
+                            @if (device.BlockRule is not null) { <span class="tag bg-brick-soft text-brick">Blocked from the internet</span> }
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        @if (device.BlockRule is null)
+                        {
+                            <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="() => BlockAsync(device)">Block</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn" disabled="@_busy" @onclick="() => UnblockAsync(device)">Unblock</button>
+                        }
+                        @if (device.Reservation is null)
+                        {
+                            <button type="button" class="btn" disabled="@_busy" @onclick="() => FixAsync(device)">Fix address</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn" disabled="@(_busy || device.BlockRule is not null)" title="@(device.BlockRule is not null ? "Unblock the device first" : null)" @onclick="() => ReleaseAsync(device)">Release address</button>
+                        }
+                        <a class="btn" href="/ports?device=@device.Address">Open a port</a>
+                    </div>
+                </li>
+            }
+        </ul>
+        <p class="text-sm text-muted">Blocking works by address, so a blocked device also gets a fixed address to make the block stick.</p>
+    }
+</div>
+
+@code {
+    private bool _busy;
+
+    private async Task RunAsync(Action<FirewallConfig> change)
+    {
+        _busy = true;
+        await SaveAsync(change);
+        _busy = false;
+    }
+
+    private static void EnsureFixed(FirewallConfig c, Device device)
+    {
+        if (c.Dhcp.Reservations.All(r => r.Mac != device.Mac))
+            c.Dhcp.Reservations.Add(new Reservation { Name = device.SafeName, Mac = device.Mac, Address = device.Address });
+    }
+
+    private Task FixAsync(Device device) => RunAsync(c => EnsureFixed(c, device));
+
+    private Task ReleaseAsync(Device device) => RunAsync(c => c.Dhcp.Reservations.RemoveAll(r => r.Mac == device.Mac));
+
+    private Task BlockAsync(Device device) => RunAsync(c =>
+    {
+        EnsureFixed(c, device);
+        // Device blocks go first so no later "allow" rule can let the device back out.
+        c.Rules.Insert(0, new FirewallRule { Name = $"Block {device.SafeName}", Source = device.Address });
+    });
+
+    private Task UnblockAsync(Device device) => RunAsync(c => c.Rules.RemoveAll(r => FirewallState.IsDeviceBlock(r, device.Address)));
+}

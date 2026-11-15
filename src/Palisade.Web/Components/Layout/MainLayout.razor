@@ -1,0 +1,125 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject FirewallState State
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<a href="@(new Uri(Nav.Uri).AbsolutePath)#main" class="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface focus:p-3">Skip to content</a>
+
+@if (State.Status?.Simulated == true)
+{
+    <p class="border-b border-ochre bg-ochre-soft px-4 py-2 text-center text-sm font-semibold text-ink">
+        Demo mode: this is a simulated network for trying the interface. Nothing here controls a real firewall.
+    </p>
+}
+
+<div class="mx-auto flex min-h-dvh max-w-6xl flex-col md:flex-row">
+    <header class="border-line md:w-56 md:shrink-0 md:border-r">
+        <div class="flex items-center justify-between gap-3 px-4 py-4 md:px-5 md:pt-7">
+            <a href="/" class="flex items-end gap-2 text-pine">
+                <Stakes Count="3" Class="h-7" />
+                <span class="text-xl font-extrabold leading-none tracking-tight text-ink">Palisade</span>
+            </a>
+        </div>
+
+        @if (Ready)
+        {
+            <nav aria-label="Main" class="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:px-3 md:pt-3">
+                @foreach (var (href, label) in Links)
+                {
+                    <NavLink href="@href" Match="@(href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)"
+                             class="flex min-h-11 shrink-0 items-center rounded-md px-3 font-semibold text-muted hover:bg-sunk hover:text-ink"
+                             ActiveClass="bg-pine-soft !text-ink">@label</NavLink>
+                }
+            </nav>
+        }
+
+        <div class="hidden px-3 pt-6 md:block">
+            <button type="button" class="btn btn-quiet w-full justify-start" @onclick="ToggleThemeAsync">@(_dark ? "Use light colours" : "Use dark colours")</button>
+            <form method="post" action="/logout">
+                <button type="submit" class="btn btn-quiet w-full justify-start">Sign out</button>
+            </form>
+        </div>
+    </header>
+
+    <main id="main" class="min-w-0 flex-1 px-4 pb-32 pt-2 md:px-10 md:pt-8">
+        @if (State.Error is not null && State.Config is null)
+        {
+            <div role="alert" class="panel max-w-xl border-brick p-6">
+                <h1 class="text-2xl font-bold" tabindex="-1">Can't reach the firewall service</h1>
+                <p class="mt-2">The page loaded, but the part of Palisade that controls the network is not answering. Your network keeps running with the last saved rules.</p>
+                <p class="mt-2 text-muted">@State.Error</p>
+                <p class="mt-2 text-muted">On the firewall itself, <code>systemctl status palisade-agent</code> shows what went wrong.</p>
+                <button type="button" class="btn btn-primary mt-4" @onclick="State.LoadAsync">Try again</button>
+            </div>
+        }
+        else if (State.Config is null)
+        {
+            <p class="pt-10 text-muted" role="status">Loading your firewall's settings.</p>
+        }
+        else
+        {
+            @Body
+        }
+
+        <div class="mt-12 flex flex-wrap gap-2 border-t border-line pt-4 md:hidden">
+            <button type="button" class="btn btn-quiet" @onclick="ToggleThemeAsync">@(_dark ? "Use light colours" : "Use dark colours")</button>
+            <form method="post" action="/logout">
+                <button type="submit" class="btn btn-quiet">Sign out</button>
+            </form>
+        </div>
+    </main>
+</div>
+
+<ApplyGuard />
+
+<div id="blazor-error-ui" data-nosnippet>
+    Something went wrong on this page.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">Dismiss</span>
+</div>
+
+@code {
+    private static readonly (string Href, string Label)[] Links =
+    [
+        ("/", "Overview"), ("/devices", "Devices"), ("/ports", "Open ports"),
+        ("/rules", "Rules"), ("/network", "Network"), ("/advanced", "Advanced"),
+    ];
+
+    private bool _dark;
+
+    private bool Ready => State.Config?.SetupComplete == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        await State.LoadAsync();
+        SendToSetupIfNeeded();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _dark = await JS.InvokeAsync<bool>("palisade.isDark");
+        StateHasChanged();
+    }
+
+    private void SendToSetupIfNeeded()
+    {
+        var onWelcome = new Uri(Nav.Uri).AbsolutePath == "/welcome";
+        if (State.Config is { SetupComplete: false } && !onWelcome) Nav.NavigateTo("/welcome");
+    }
+
+    private async Task ToggleThemeAsync() => _dark = await JS.InvokeAsync<bool>("palisade.toggleTheme");
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(SendToSetupIfNeeded);
+
+    public void Dispose()
+    {
+        State.Changed -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

@@ -1,0 +1,134 @@
+@implements IDisposable
+@inject FirewallState State
+@inject IJSRuntime JS
+@inject WebPorts Ports
+
+@* Every change goes live first and is only kept once a brand-new connection to the firewall succeeds.
+   If it does not, the owner gets a countdown and the agent undoes the change by itself. *@
+<div aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center p-3 sm:p-5">
+    @if (_phase != Phase.Idle)
+    {
+        <div class="pointer-events-auto w-full max-w-xl rounded-lg border-2 p-4 shadow-lg @(_phase is Phase.Unsure ? "border-ochre bg-ochre-soft" : "border-pine bg-surface")">
+            @switch (_phase)
+            {
+                case Phase.Checking:
+                    <p class="font-semibold">Your change is live. Checking that you can still reach the firewall.</p>
+                    break;
+                case Phase.Saved:
+                    <p class="font-semibold">Saved. Your change is live and will survive a restart.</p>
+                    break;
+                case Phase.Undone:
+                    <p class="font-semibold">The change was undone. Your previous settings are back.</p>
+                    break;
+                case Phase.Elsewhere:
+                    <p class="font-semibold">This change was already settled, here or in another window. The page now shows the current settings.</p>
+                    break;
+                case Phase.Unsure:
+                    <p class="font-bold">We could not confirm a fresh connection to the firewall.</p>
+                    <p class="mt-1">To keep you from being locked out, the change will be undone in <strong>@_secondsLeft seconds</strong> unless you keep it.</p>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-primary" @onclick="KeepAsync">Keep the change</button>
+                        <button type="button" class="btn" @onclick="UndoAsync">Undo now</button>
+                    </div>
+                    break;
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private enum Phase { Idle, Checking, Saved, Unsure, Undone, Elsewhere }
+
+    private Phase _phase;
+    private int _secondsLeft;
+    private CancellationTokenSource? _cts;
+
+    protected override void OnInitialized()
+    {
+        State.ApplyStarted += OnApplyStarted;
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnApplyStarted() => _ = InvokeAsync(RunAsync);
+
+    // A page opened while a change is still waiting (for example after moving the firewall to a new
+    // address and signing in there) has no ApplyStarted event to react to, so pick it up from the status.
+    private void OnStateChanged()
+    {
+        if (_phase == Phase.Idle && State.Status?.PendingSecondsLeft is > 0) _ = InvokeAsync(RunAsync);
+    }
+
+    private async Task RunAsync()
+    {
+        _cts?.Cancel();
+        var cts = _cts = new CancellationTokenSource();
+        _phase = Phase.Checking;
+        StateHasChanged();
+
+        bool reachable;
+        try
+        {
+            reachable = await JS.InvokeAsync<bool>("palisade.checkReachable", cts.Token, Ports.Check);
+        }
+        catch (Exception ex) when (ex is JSException or OperationCanceledException or JSDisconnectedException)
+        {
+            reachable = false;
+        }
+        if (cts.IsCancellationRequested) return;
+
+        if (reachable)
+        {
+            await State.ConfirmAsync();
+            await ShowBrieflyAsync(Phase.Saved, cts.Token);
+            return;
+        }
+
+        _phase = Phase.Unsure;
+        while (!cts.IsCancellationRequested)
+        {
+            // Ask the firewall each second rather than counting locally: another open window may keep
+            // or undo the change, and the firewall's own clock decides when it is undone.
+            await State.RefreshStatusAsync();
+            if (cts.IsCancellationRequested) return;
+            if (State.Status?.PendingSecondsLeft is not { } left)
+            {
+                await State.LoadAsync();
+                await ShowBrieflyAsync(_secondsLeft <= 3 ? Phase.Undone : Phase.Elsewhere, cts.Token);
+                return;
+            }
+            _secondsLeft = left;
+            StateHasChanged();
+            try { await Task.Delay(1000, cts.Token); } catch (OperationCanceledException) { return; }
+        }
+    }
+
+    private Task KeepAsync() => SettleAsync(State.ConfirmAsync, Phase.Saved);
+
+    private Task UndoAsync() => SettleAsync(State.RevertAsync, Phase.Undone);
+
+    private async Task SettleAsync(Func<Task> action, Phase outcome)
+    {
+        _cts?.Cancel();
+        await State.RefreshStatusAsync();
+        var stillPending = State.Status?.PendingSecondsLeft is not null;
+        if (stillPending) await action();
+        await State.LoadAsync();
+        await ShowBrieflyAsync(stillPending ? outcome : Phase.Elsewhere, CancellationToken.None);
+    }
+
+    private async Task ShowBrieflyAsync(Phase phase, CancellationToken ct)
+    {
+        _phase = phase;
+        StateHasChanged();
+        try { await Task.Delay(4500, ct); } catch (OperationCanceledException) { return; }
+        if (_phase == phase) _phase = Phase.Idle;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        State.ApplyStarted -= OnApplyStarted;
+        State.Changed -= OnStateChanged;
+        _cts?.Cancel();
+    }
+}
