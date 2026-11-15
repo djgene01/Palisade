@@ -1,0 +1,175 @@
+@page "/filter"
+@inherits StatePage
+
+<PageTitle>Content filter · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Content filter</h1>
+<div class="mt-2 max-w-2xl space-y-2 text-lg text-muted">
+    <p>Before a device can open a site it asks the firewall where that site is. The filter refuses to answer for sites you don't want, so they never load.</p>
+</div>
+
+<div class="mt-8 max-w-3xl space-y-12">
+    @if (_at == "") { <Problems Issues="Issues" /> }
+
+    <section>
+        <fieldset disabled="@_busy">
+            <legend class="text-xl font-bold">What should be blocked for everyone?</legend>
+            <p class="field-hint">Pick the strictest level your household needs, then relax it below for the grown-ups' devices. A new device then starts out protected.</p>
+            <div class="mt-3 space-y-2">
+                @foreach (var level in FilterPlan.AllLevels)
+                {
+                    var chosen = Config.Filter.Level == level;
+                    <label class="panel flex min-h-14 cursor-pointer items-start gap-3 p-3 @(chosen ? "border-pine bg-pine-soft" : "")">
+                        <input type="radio" name="level" class="mt-1 h-5 w-5 shrink-0 accent-pine" checked="@chosen" @onchange="() => RunAsync(c => c.Filter.Level = level)" />
+                        <span>
+                            <span class="font-bold">@Fmt.FilterLevel(level)</span>
+                            <span class="block text-muted">@Fmt.FilterLevelDetail(level)</span>
+                        </span>
+                    </label>
+                }
+            </div>
+        </fieldset>
+    </section>
+
+    <section aria-labelledby="devices-title">
+        <h2 id="devices-title" class="text-xl font-bold">Devices with their own level</h2>
+        <p class="field-hint">A device is recognised by its hardware address. Phones can be set to change that address per network, which makes them look like a new device, so new devices always get the level for everyone.</p>
+        @{ var rows = Rows(); }
+        @if (rows.Count == 0)
+        {
+            <p class="panel mt-3 p-4 text-muted">No devices have joined yet. They appear here once they connect.</p>
+        }
+        else
+        {
+            <ul class="panel mt-3 divide-y divide-line">
+                @foreach (var row in rows)
+                {
+                    var id = $"level-{row.Mac.Replace(":", "")}";
+                    <li class="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
+                        <div class="min-w-0 flex-1 basis-48">
+                            <p class="truncate font-bold">@row.Name</p>
+                            <p class="text-sm text-muted">@row.Mac@(row.Online ? "" : " · not connected now")</p>
+                        </div>
+                        <div class="basis-64">
+                            <label for="@id" class="sr-only">Filter level for @row.Name</label>
+                            <select id="@id" class="input" disabled="@_busy" value="@(row.Own?.ToString() ?? "")" @onchange="e => SetDeviceAsync(row, (string?)e.Value)">
+                                <option value="">Same as everyone</option>
+                                @foreach (var level in FilterPlan.AllLevels)
+                                {
+                                    <option value="@level">@Fmt.FilterLevel(level)</option>
+                                }
+                            </select>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section aria-labelledby="blocked-title">
+        <h2 id="blocked-title" class="text-xl font-bold">Sites nobody may open</h2>
+        <p class="field-hint">Blocked on every device, whatever its level. A site name covers everything under it: tiktok.com also blocks www.tiktok.com.</p>
+        <form class="mt-3 flex flex-wrap gap-2" @onsubmit="() => AddSiteAsync(blocked: true)">
+            <label for="block-site" class="sr-only">Site to block</label>
+            <input id="block-site" class="input max-w-sm flex-1" placeholder="example.com" autocapitalize="none" spellcheck="false" @bind="_block" />
+            <button type="submit" class="btn btn-danger" disabled="@_busy">Block this site</button>
+        </form>
+        @if (_at == "blocked") { <div class="mt-3 max-w-xl"><Problems Issues="Issues" /></div> }
+        @SiteList(Config.Filter.BlockedSites, true)
+    </section>
+
+    <section aria-labelledby="allowed-title">
+        <h2 id="allowed-title" class="text-xl font-bold">Sites that always open</h2>
+        <p class="field-hint">For a site a level blocks but your household needs. It opens on every device.</p>
+        <form class="mt-3 flex flex-wrap gap-2" @onsubmit="() => AddSiteAsync(blocked: false)">
+            <label for="allow-site" class="sr-only">Site to allow</label>
+            <input id="allow-site" class="input max-w-sm flex-1" placeholder="example.com" autocapitalize="none" spellcheck="false" @bind="_allow" />
+            <button type="submit" class="btn" disabled="@_busy">Always allow this site</button>
+        </form>
+        @if (_at == "allowed") { <div class="mt-3 max-w-xl"><Problems Issues="Issues" /></div> }
+        @SiteList(Config.Filter.AllowedSites, false)
+    </section>
+
+    <section aria-labelledby="limits-title" class="max-w-2xl">
+        <h2 id="limits-title" class="text-xl font-bold">What this can and can't do</h2>
+        <ul class="mt-3 list-disc space-y-2 pl-5">
+            <li>It blocks whole sites, not single pages or videos inside a site.</li>
+            <li>Devices can't get around it by choosing another name server: while anything is filtered, every lookup is answered by this firewall.</li>
+            <li>A VPN app, or a browser with its own "secure DNS" switched on by hand, can still get around it. The strict level blocks the sites of the well-known VPN services, which makes that harder, not impossible.</li>
+            <li>It only covers devices on this network. A phone on mobile data is not filtered.</li>
+            <li>The lists of harmful and adult sites are kept by Cloudflare and CleanBrowsing. When a level is on, the firewall sends them the names of the sites your devices look up, and nothing else.</li>
+        </ul>
+    </section>
+</div>
+
+@code {
+    private sealed record Row(string Name, string SafeName, string Mac, bool Online, FilterLevel? Own);
+
+    private bool _busy;
+    private string _block = "", _allow = "";
+    /// <summary>Which part of the page the current problems belong to, so they show next to what caused them.</summary>
+    private string _at = "";
+
+    private RenderFragment SiteList(List<string> sites, bool blocked) => @<text>
+        @if (sites.Count > 0)
+        {
+            <ul class="panel mt-3 max-w-xl divide-y divide-line">
+                @foreach (var site in sites)
+                {
+                    <li class="flex items-center justify-between gap-3 py-2 pl-4 pr-2">
+                        <span class="min-w-0 break-all font-semibold">@site</span>
+                        <button type="button" class="btn btn-quiet" disabled="@_busy" aria-label="@($"Remove {site}")"
+                                @onclick="() => RunAsync(c => (blocked ? c.Filter.BlockedSites : c.Filter.AllowedSites).Remove(site))">Remove</button>
+                    </li>
+                }
+            </ul>
+        }
+    </text>;
+
+    /// <summary>Devices on the network now, then devices that have their own level but are away.</summary>
+    private List<Row> Rows()
+    {
+        var rows = State.Devices()
+            .Select(d => new Row(d.Name, d.SafeName, d.Mac, d.Online, Config.Filter.Devices.FirstOrDefault(f => f.Mac == d.Mac)?.Level))
+            .ToList();
+        rows.AddRange(Config.Filter.Devices.Where(f => rows.All(r => r.Mac != f.Mac)).Select(f => new Row(f.Name, f.Name, f.Mac, false, f.Level)));
+        return rows;
+    }
+
+    private async Task RunAsync(Action<FirewallConfig> change)
+    {
+        _at = "";
+        _busy = true;
+        await SaveAsync(change);
+        _busy = false;
+    }
+
+    private Task SetDeviceAsync(Row row, string? value) => RunAsync(c =>
+    {
+        c.Filter.Devices.RemoveAll(f => f.Mac == row.Mac);
+        if (Enum.TryParse<FilterLevel>(value, out var level))
+            c.Filter.Devices.Add(new DeviceFilter { Mac = row.Mac, Name = row.SafeName, Level = level });
+    });
+
+    private async Task AddSiteAsync(bool blocked)
+    {
+        _at = blocked ? "blocked" : "allowed";
+        var typed = blocked ? _block : _allow;
+        if (!SiteName.TryNormalize(typed, out var site))
+        {
+            Issues = [new("", typed.Trim().Length == 0 ? "Type the name of a site, such as example.com." : $"\"{typed.Trim()}\" is not a site name. Use a name like example.com.")];
+            return;
+        }
+        var list = blocked ? Config.Filter.BlockedSites : Config.Filter.AllowedSites;
+        if (list.Contains(site))
+        {
+            Issues = [new("", $"{site} is already on that list.")];
+            return;
+        }
+        _busy = true;
+        var saved = await SaveAsync(c => (blocked ? c.Filter.BlockedSites : c.Filter.AllowedSites).Add(site));
+        _busy = false;
+        if (!saved) return;
+        if (blocked) _block = ""; else _allow = "";
+    }
+}

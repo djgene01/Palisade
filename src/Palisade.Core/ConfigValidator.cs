@@ -124,6 +124,29 @@ public static partial class ConfigValidator
             }
         }
 
+        var filter = c.Filter;
+        if (!Enum.IsDefined(filter.Level)) Add("Filter.Level", "Choose one of the filter levels.");
+        foreach (var (list, field) in new[] { (filter.BlockedSites, "Filter.BlockedSites"), (filter.AllowedSites, "Filter.AllowedSites") })
+        {
+            if (list.Count > 300) Add(field, "A list can hold at most 300 sites.");
+            foreach (var site in list)
+                if (!SiteName.IsValid(site)) Add(field, $"\"{site}\" is not a site name. Use a name like example.com.");
+            if (list.Distinct().Count() != list.Count) Add(field, "The same site is listed twice.");
+        }
+        foreach (var site in filter.BlockedSites.Intersect(filter.AllowedSites))
+            Add("Filter.AllowedSites", $"{site} is on both the blocked and the allowed list. Remove it from one.");
+
+        if (filter.Devices.Count > 200) Add("Filter.Devices", "At most 200 devices can have their own filter level.");
+        var filtered = new HashSet<string>();
+        foreach (var device in filter.Devices)
+        {
+            var field = $"Filter.Device.{device.Mac}";
+            if (!MacAddress().IsMatch(device.Mac)) Add(field, $"\"{device.Mac}\" is not a valid hardware (MAC) address.");
+            else if (!filtered.Add(device.Mac)) Add(field, $"{device.Mac} has two filter levels. Keep one.");
+            if (!IsSafeName(device.Name)) Add(field, "A device with its own filter level needs a short name using letters, numbers and spaces.");
+            if (!Enum.IsDefined(device.Level)) Add(field, $"{device.Name}: choose one of the filter levels.");
+        }
+
         return issues;
     }
 

@@ -28,6 +28,7 @@ public sealed class FirewallConfig
     public DhcpSettings Dhcp { get; set; } = new();
     public List<PortForward> PortForwards { get; set; } = [];
     public List<FirewallRule> Rules { get; set; } = [];
+    public ContentFilter Filter { get; set; } = new();
 
     public FirewallConfig Clone() =>
         JsonSerializer.Deserialize<FirewallConfig>(JsonSerializer.Serialize(this, PalisadeJson.Options), PalisadeJson.Options)!;

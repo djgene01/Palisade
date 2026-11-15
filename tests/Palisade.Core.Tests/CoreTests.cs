@@ -144,6 +144,164 @@ public class CoreTests
     }
 
     [Fact]
+    public void Config_saved_before_the_filter_existed_renders_as_before()
+    {
+        var old = System.Text.Json.JsonSerializer.Serialize(Sample(), PalisadeJson.Options);
+        var start = old.IndexOf("\"filter\"", StringComparison.Ordinal);
+        Assert.True(start > 0);
+        old = old[..old.LastIndexOf(',', start)] + "\n}";
+        var c = System.Text.Json.JsonSerializer.Deserialize<FirewallConfig>(old, PalisadeJson.Options)!;
+
+        Assert.Equal(FilterLevel.Off, c.Filter.Level);
+        Assert.Empty(ConfigValidator.Validate(c));
+        var files = ConfigRenderer.Render(c);
+        Assert.Empty(files.DnsInstances);
+        Assert.DoesNotContain("redirect", files.Nftables);
+        Assert.DoesNotContain("853", files.Nftables);
+        Assert.DoesNotContain("ether saddr", files.Nftables);
+        Assert.Contains("server=1.1.1.1\n", files.Dnsmasq);
+        Assert.DoesNotContain("use-application-dns.net", files.Dnsmasq);
+    }
+
+    private static FirewallConfig Filtered()
+    {
+        var c = Sample();
+        c.Filter = new ContentFilter
+        {
+            Level = FilterLevel.Family,
+            BlockedSites = { "tiktok.com" },
+            AllowedSites = { "reddit.com" },
+            Devices =
+            {
+                new DeviceFilter { Mac = "aa:bb:cc:dd:ee:10", Name = "Mum laptop", Level = FilterLevel.Security },
+                new DeviceFilter { Mac = "aa:bb:cc:dd:ee:11", Name = "Dad phone", Level = FilterLevel.Off },
+                new DeviceFilter { Mac = "aa:bb:cc:dd:ee:12", Name = "Same as network", Level = FilterLevel.Family },
+            },
+        };
+        return c;
+    }
+
+    [Fact]
+    public void Filter_picks_one_kind_of_name_server_per_level()
+    {
+        var c = Filtered();
+        Assert.Empty(ConfigValidator.Validate(c));
+        var files = ConfigRenderer.Render(c);
+
+        // The network's own server asks only the family service, never the plain one as well.
+        Assert.Contains("server=185.228.168.168\n", files.Dnsmasq);
+        Assert.DoesNotContain("server=1.1.1.1\n", files.Dnsmasq);
+        Assert.Contains("local=/tiktok.com/\n", files.Dnsmasq);
+        Assert.Contains("local=/use-application-dns.net/\n", files.Dnsmasq);
+        Assert.Contains("server=/reddit.com/1.1.1.1\n", files.Dnsmasq);
+        Assert.Contains("dhcp-range=", files.Dnsmasq);
+
+        Assert.Equal(["off", "security"], files.DnsInstances.Select(i => i.Name));
+        var off = files.DnsInstances[0];
+        Assert.Contains("port=5380\n", off.Conf);
+        Assert.Contains("server=1.1.1.1\n", off.Conf);
+        Assert.Contains("local=/tiktok.com/\n", off.Conf);
+        Assert.DoesNotContain("use-application-dns.net", off.Conf);
+        Assert.DoesNotContain("dhcp-range", off.Conf);
+        var security = files.DnsInstances[1];
+        Assert.Contains("port=5381\n", security.Conf);
+        Assert.Contains("server=1.1.1.2\n", security.Conf);
+        Assert.DoesNotContain("185.228", security.Conf);
+        Assert.All(files.DnsInstances, i => Assert.DoesNotContain('\r', i.Conf));
+    }
+
+    [Fact]
+    public void Filter_forces_lookups_through_the_firewall()
+    {
+        var text = ConfigRenderer.Nftables(Filtered());
+
+        Assert.Contains("iifname \"enp2s0\" meta l4proto { tcp, udp } th dport { 5380, 5381 } accept", text);
+        Assert.Contains("iifname \"enp2s0\" ether saddr { aa:bb:cc:dd:ee:11 } meta l4proto { tcp, udp } th dport 53 counter redirect to :5380", text);
+        Assert.Contains("iifname \"enp2s0\" ether saddr { aa:bb:cc:dd:ee:10 } meta l4proto { tcp, udp } th dport 53 counter redirect to :5381", text);
+        Assert.Contains("iifname \"enp2s0\" meta l4proto { tcp, udp } th dport 53 counter redirect to :53 ", text);
+        Assert.Contains("iifname \"enp2s0\" oifname \"enp1s0\" ether saddr != { aa:bb:cc:dd:ee:11 } meta l4proto { tcp, udp } th dport 853 counter reject", text);
+        // A device whose own level equals the network's needs no rule of its own.
+        Assert.DoesNotContain("aa:bb:cc:dd:ee:12", text);
+        // Per-device redirects must be tried before the catch-all, and the 853 block before any user "allow" rule.
+        Assert.True(text.IndexOf("redirect to :5381", StringComparison.Ordinal) < text.IndexOf("redirect to :53 ", StringComparison.Ordinal));
+        Assert.True(text.IndexOf("dport 853", StringComparison.Ordinal) < text.IndexOf("Block tablet", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Blocked_sites_alone_also_switch_enforcement_on()
+    {
+        var c = Sample();
+        c.Filter.BlockedSites.Add("tiktok.com");
+        var files = ConfigRenderer.Render(c);
+
+        Assert.Contains("redirect to :53 ", files.Nftables);
+        Assert.Contains("local=/tiktok.com/\n", files.Dnsmasq);
+        Assert.Contains("server=1.1.1.1\n", files.Dnsmasq);
+        Assert.Empty(files.DnsInstances);
+    }
+
+    [Theory]
+    [InlineData("tiktok.com/\naddress=/#/1.2.3.4")]
+    [InlineData("tiktok.com/#")]
+    [InlineData("TikTok.com")]
+    [InlineData("tiktok")]
+    [InlineData("-bad.com")]
+    [InlineData("a b.com")]
+    [InlineData("")]
+    public void Unsafe_site_names_are_rejected_and_never_rendered(string site)
+    {
+        foreach (var allowed in new[] { false, true })
+        {
+            var c = Filtered();
+            (allowed ? c.Filter.AllowedSites : c.Filter.BlockedSites).Add(site);
+
+            Assert.NotEmpty(ConfigValidator.Validate(c));
+            Assert.Throws<InvalidOperationException>(() => ConfigRenderer.Render(c));
+        }
+    }
+
+    [Theory]
+    [InlineData("aa:bb:cc:dd:ee:1")]
+    [InlineData("AA:BB:CC:DD:EE:10")]
+    [InlineData("aa:bb:cc:dd:ee:10 } accept; ip saddr { 1.1.1.1")]
+    public void Unsafe_hardware_addresses_are_rejected_and_never_rendered(string mac)
+    {
+        var c = Filtered();
+        c.Filter.Devices[0].Mac = mac;
+
+        Assert.NotEmpty(ConfigValidator.Validate(c));
+        Assert.Throws<InvalidOperationException>(() => ConfigRenderer.Nftables(c));
+    }
+
+    [Fact]
+    public void Filter_validation_catches_common_mistakes()
+    {
+        var c = Filtered();
+        c.Filter.AllowedSites.Add("tiktok.com");
+        c.Filter.BlockedSites.Add("tiktok.com");
+        c.Filter.Devices.Add(new DeviceFilter { Mac = "aa:bb:cc:dd:ee:10", Name = "Twice", Level = FilterLevel.Adult });
+        var fields = ConfigValidator.Validate(c).Select(i => i.Field).ToList();
+
+        Assert.Contains("Filter.BlockedSites", fields);
+        Assert.Contains("Filter.AllowedSites", fields);
+        Assert.Contains("Filter.Device.aa:bb:cc:dd:ee:10", fields);
+    }
+
+    [Theory]
+    [InlineData("https://www.TikTok.com/@someone?lang=en", "tiktok.com")]
+    [InlineData("  reddit.com.  ", "reddit.com")]
+    [InlineData("*.example.co.za", "example.co.za")]
+    [InlineData("www.com", "www.com")]
+    [InlineData("m.youtube.com:443/watch", "m.youtube.com")]
+    public void Pasted_addresses_are_reduced_to_a_site_name(string pasted, string expected)
+    {
+        Assert.True(SiteName.TryNormalize(pasted, out var name));
+        Assert.Equal(expected, name);
+        Assert.False(SiteName.TryNormalize("not a site", out _));
+        Assert.False(SiteName.TryNormalize("192.168.1.1", out _));
+    }
+
+    [Fact]
     public void Lease_file_is_parsed()
     {
         var leases = LeaseParser.Parse("1800000000 aa:bb:cc:dd:ee:01 192.168.50.101 laptop 01:aa:bb:cc:dd:ee:01\n1800000100 AA:BB:CC:DD:EE:02 192.168.50.102 * *\ngarbage\n");

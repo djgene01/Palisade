@@ -24,7 +24,10 @@ apt-get update -q
 apt-get install -y -q nftables dnsmasq iproute2 ca-certificates "$(apt-cache --names-only search '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
 
 # dnsmasq must stay quiet until Palisade has been set up, otherwise it would answer on every port.
-systemctl disable --now dnsmasq >/dev/null 2>&1 || true
+# On an upgrade it is already serving the home network, so leave it running.
+if [ ! -f /var/lib/palisade/config.json ]; then
+    systemctl disable --now dnsmasq >/dev/null 2>&1 || true
+fi
 
 if ! id palisade >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin palisade
@@ -38,7 +41,7 @@ cp -r "$here/agent" "$here/web" /opt/palisade/
 chown -R root:root /opt/palisade
 chmod 755 /opt/palisade/agent/Palisade.Agent /opt/palisade/web/Palisade.Web
 
-install -m 644 "$here/palisade-agent.service" "$here/palisade-web.service" /etc/systemd/system/
+install -m 644 "$here/palisade-agent.service" "$here/palisade-web.service" "$here/palisade-dns@.service" /etc/systemd/system/
 systemctl daemon-reload
 
 # nftables.service reloads the saved rules at every boot, before and without Palisade's own programs.
@@ -49,4 +52,8 @@ echo
 echo "Palisade is running. Open one of these in a browser on the same network:"
 ip -4 -o addr show scope global | awk '{split($4, a, "/"); print "  http://" a[1] ":8080   (port " $2 ")"}'
 echo
-echo "Until you finish the setup page, this machine filters nothing."
+if [ -f /var/lib/palisade/config.json ]; then
+    echo "Upgraded. Your settings were kept and are back in force."
+else
+    echo "Until you finish the setup page, this machine filters nothing."
+fi

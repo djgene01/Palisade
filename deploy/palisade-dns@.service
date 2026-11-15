@@ -1,0 +1,13 @@
+[Unit]
+Description=Palisade name server for devices on the "%i" filter level
+After=network.target
+
+[Service]
+Type=simple
+# Reads only its own file, so the settings of the main dnsmasq in /etc/dnsmasq.d never leak in.
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --user=dnsmasq --pid-file=/run/palisade-dns-%i.pid --conf-file=/etc/palisade/dns/%i.conf
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

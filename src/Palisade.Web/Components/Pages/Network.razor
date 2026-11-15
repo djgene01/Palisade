@@ -66,6 +66,10 @@
             <label for="dns" class="field-label">Name servers (DNS)</label>
             <input id="dns" class="input" @bind="_dns" />
             <p class="field-hint">Where the firewall looks up website names for your devices. Separate addresses with commas. Leave empty to use whatever the internet side provides.</p>
+            @if (Config.Filter.Level != FilterLevel.Off)
+            {
+                <p class="field-hint">The <a class="font-bold text-pine underline underline-offset-4" href="/filter">content filter</a> is on, so lookups go to its filtering service instead. These servers are still used for devices set to "No filtering" and for sites you always allow.</p>
+            }
         </div>
     </section>
 

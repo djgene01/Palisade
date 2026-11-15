@@ -14,6 +14,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     private const string LanInterfaceConf = "/etc/network/interfaces.d/palisade-lan";
     private const string SysctlConf = "/etc/sysctl.d/90-palisade.conf";
     private const string LeaseFile = "/var/lib/misc/dnsmasq.leases";
+    private const string DnsInstanceDirectory = "/etc/palisade/dns";
 
     private DateTimeOffset _internetCheckedAt;
     private bool _internetReachable;
@@ -39,6 +40,13 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         if (nftCheck.ExitCode != 0) problems.Add($"The firewall rules were rejected: {nftCheck.Error.Trim()}");
         var dnsmasqCheck = await RunAsync("dnsmasq", ["--test", $"--conf-file={dnsmasq}"], ct);
         if (dnsmasqCheck.ExitCode != 0) problems.Add($"The DHCP settings were rejected: {dnsmasqCheck.Error.Trim()}");
+        foreach (var instance in files.DnsInstances)
+        {
+            var path = Path.Combine(dataDirectory, $"candidate.dns-{instance.Name}.conf");
+            await File.WriteAllTextAsync(path, instance.Conf, ct);
+            var check = await RunAsync("dnsmasq", ["--test", $"--conf-file={path}"], ct);
+            if (check.ExitCode != 0) problems.Add($"The content filter settings were rejected: {check.Error.Trim()}");
+        }
         return problems;
     }
 
@@ -58,13 +66,31 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
             await MustRunAsync("ip", ["addr", "add", wanted, "dev", config.LanInterface], ct);
         }
 
+        // The name servers start before the rules that point devices at them, so no lookup is sent to a port nobody answers yet.
+        await WriteAtomicAsync(DnsmasqConf, files.Dnsmasq, ct);
+        await MustRunAsync("systemctl", ["enable", "dnsmasq"], ct);
+        await MustRunAsync("systemctl", ["restart", "dnsmasq"], ct);
+        foreach (var level in FilterPlan.AllLevels)
+        {
+            var unit = InstanceUnit(level);
+            if (files.DnsInstances.FirstOrDefault(i => i.Level == level) is { } instance)
+            {
+                await WriteAtomicAsync(InstanceConf(level), instance.Conf, ct);
+                await MustRunAsync("systemctl", ["enable", unit], ct);
+                await MustRunAsync("systemctl", ["restart", unit], ct);
+            }
+            else await StopInstanceAsync(level, ct);
+        }
+
         // nftables.service loads this same file at boot, so protection never depends on this agent being up.
         await WriteAtomicAsync(NftablesConf, files.Nftables, ct);
         await MustRunAsync("nft", ["-f", NftablesConf], ct);
 
-        await WriteAtomicAsync(DnsmasqConf, files.Dnsmasq, ct);
-        await MustRunAsync("systemctl", ["enable", "dnsmasq"], ct);
-        await MustRunAsync("systemctl", ["restart", "dnsmasq"], ct);
+        // The browser's reachability check cannot notice dead name lookups, and to a household those look
+        // like "the internet is down". Failing here makes the engine put the previous settings back.
+        foreach (var port in files.DnsInstances.Select(i => i.Port).Prepend(53))
+            if (!await DnsProbe.AnswersAsync(config.LanAddress, port, FilterPlan.CheckName, TimeSpan.FromSeconds(8), ct))
+                throw new InvalidOperationException($"the name server on port {port} did not answer after the change");
     }
 
     public async Task ClearAsync(CancellationToken ct)
@@ -73,6 +99,18 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         await RunAsync("nft", ["flush", "ruleset"], ct);
         File.Delete(DnsmasqConf);
         await RunAsync("systemctl", ["disable", "--now", "dnsmasq"], ct);
+        foreach (var level in FilterPlan.AllLevels) await StopInstanceAsync(level, ct);
+    }
+
+    private static string InstanceUnit(FilterLevel level) => $"palisade-dns@{FilterPlan.Name(level)}.service";
+
+    private static string InstanceConf(FilterLevel level) => $"{DnsInstanceDirectory}/{FilterPlan.Name(level)}.conf";
+
+    private async Task StopInstanceAsync(FilterLevel level, CancellationToken ct)
+    {
+        if (!File.Exists(InstanceConf(level))) return;
+        await RunAsync("systemctl", ["disable", "--now", InstanceUnit(level)], ct);
+        File.Delete(InstanceConf(level));
     }
 
     public async Task<SystemStatus> GetStatusAsync(FirewallConfig active, CancellationToken ct)

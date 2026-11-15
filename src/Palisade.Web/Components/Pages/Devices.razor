@@ -37,6 +37,7 @@
                             @if (!device.Online) { <span class="tag bg-sunk text-muted">Not connected now</span> }
                             @if (device.Reservation is not null) { <span class="tag bg-pine-soft text-ink">Fixed address</span> }
                             @if (device.BlockRule is not null) { <span class="tag bg-brick-soft text-brick">Blocked from the internet</span> }
+                            @if (Config.Filter.Devices.FirstOrDefault(f => f.Mac == device.Mac) is { } own) { <a class="tag bg-sunk text-ink underline underline-offset-2" href="/filter">Own filter level: @Fmt.FilterLevel(own.Level)</a> }
                         </p>
                     </div>
                     <div class="flex flex-wrap gap-2">

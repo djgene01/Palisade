@@ -133,6 +133,22 @@ public static class Fmt
 
     public static string Plural(int count, string one, string many) => count == 1 ? $"1 {one}" : $"{count} {many}";
 
+    public static string FilterLevel(FilterLevel level) => level switch
+    {
+        Core.FilterLevel.Security => "Harmful sites",
+        Core.FilterLevel.Adult => "Harmful and adult sites",
+        Core.FilterLevel.Family => "Strict, for children",
+        _ => "No filtering",
+    };
+
+    public static string FilterLevelDetail(FilterLevel level) => level switch
+    {
+        Core.FilterLevel.Security => "Blocks sites known for viruses, scams and stealing passwords.",
+        Core.FilterLevel.Adult => "Also blocks pornography and other adult sites.",
+        Core.FilterLevel.Family => "Also locks Google, Bing and YouTube into safe search, and blocks VPN sites and mixed sites such as Reddit.",
+        _ => "Every site opens, apart from the ones you block yourself below.",
+    };
+
     public static string Protocol(Protocol p) => p switch
     {
         Core.Protocol.Tcp => "TCP",
