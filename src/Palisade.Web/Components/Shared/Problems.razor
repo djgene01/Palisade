@@ -1,6 +1,6 @@
 @if (Issues.Count > 0)
 {
-    <div role="alert" class="rounded-md border border-brick bg-brick-soft p-4 text-ink">
+    <div role="alert" class="rounded-md border border-danger bg-danger-soft p-4 text-ink">
         <p class="font-bold">@(Issues.Count == 1 ? "This needs fixing before it can be saved:" : "These need fixing before it can be saved:")</p>
         <ul class="mt-1 list-disc space-y-1 pl-5">
             @foreach (var issue in Issues)

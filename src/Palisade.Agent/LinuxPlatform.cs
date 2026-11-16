@@ -54,6 +54,12 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
                     problems.Add($"The internet port ({config.WanInterface}) has the address {word}, which is in the same range as your network ({config.LanAddress}). Give your network a different range, such as 192.168.50.1 or 10.10.10.1.");
                     return problems;
                 }
+                foreach (var extra in config.ExtraNetworks)
+                {
+                    if (!Ip4.TryParse(extra.Address, out var own) || !own.IsIn(address, Math.Min(prefix, extra.Prefix))) continue;
+                    problems.Add($"The internet port ({config.WanInterface}) has the address {word}, which is in the same range as the extra network \"{extra.Name}\". That range is already reachable through the internet port, so remove the extra network.");
+                    return problems;
+                }
             }
         }
 
@@ -83,14 +89,15 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
 
         await ApplyWanPortAsync(config.WanInterface, files.WanInterface, ct);
         await WriteAtomicAsync(LanInterfaceConf, files.LanInterface, ct);
-        var wanted = $"{config.LanAddress}/{config.LanPrefix}";
+        var wanted = ConfigRenderer.LanAddresses(config);
         await MustRunAsync("ip", ["link", "set", "dev", config.LanInterface, "up"], ct);
         var current = await RunAsync("ip", ["-4", "-o", "addr", "show", "dev", config.LanInterface, "scope", "global"], ct);
         var lines = current.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        if (lines.Length != 1 || !lines[0].Contains($" {wanted} "))
+        if (lines.Length != wanted.Count || wanted.Any(w => !lines.Any(l => l.Contains($" {w} "))))
         {
             await MustRunAsync("ip", ["-4", "addr", "flush", "dev", config.LanInterface, "scope", "global"], ct);
-            await MustRunAsync("ip", ["addr", "add", wanted, "dev", config.LanInterface], ct);
+            foreach (var address in wanted)
+                await MustRunAsync("ip", ["addr", "add", address, "dev", config.LanInterface], ct);
         }
 
         // The name servers start before the rules that point devices at them, so no lookup is sent to a port nobody answers yet.

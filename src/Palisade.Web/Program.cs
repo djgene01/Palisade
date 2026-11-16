@@ -38,6 +38,8 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 });
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton(new PasswordStore(dataDirectory));
+// Asking who made a device goes out to the internet, so the demo on a development machine leaves it off unless told otherwise.
+builder.Services.AddSingleton(new MakerLookup(dataDirectory, builder.Configuration.GetValue("Palisade:MakerLookup", backendKind != "simulated")));
 builder.Services.AddScoped<FirewallState>();
 
 if (backendKind == "simulated")

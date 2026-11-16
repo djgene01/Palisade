@@ -12,58 +12,98 @@
     var openPorts = Config.PortForwards.Count(f => f.Enabled);
     var rules = Config.Rules.Count(r => r.Enabled);
     var attention = Attention().ToList();
+    var wanUp = State.Wan?.IsUp == true;
+    var lanUp = State.Lan?.IsUp == true;
 }
 
-<h1 class="text-4xl font-extrabold leading-tight md:text-5xl" tabindex="-1">
-    @(status is null ? "Checking your network" : protectedNow ? "Your network is protected." : "Protection is off.")
-</h1>
-<p class="mt-3 text-lg text-muted">
+<div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="flex items-center gap-4">
+        <Icon Name="@(protectedNow ? "shield-check" : "shield")" Class="@($"h-14 w-14 md:h-20 md:w-20 {(protectedNow ? "text-ok" : "text-muted")}")" />
+        <div>
+            <h1 class="text-3xl font-extrabold leading-tight md:text-5xl" tabindex="-1">
+                @if (status is null) { <span>Checking your network</span> }
+                else if (protectedNow) { <span>Your network is <span class="text-ok">protected</span>.</span> }
+                else { <span>Protection is <span class="text-danger">off</span>.</span> }
+            </h1>
+            <p class="mt-2 text-lg text-muted">
+                @if (status is not null)
+                {
+                    <span>@(status.InternetReachable ? "The internet is reachable." : "The internet is not reachable right now.") </span>
+                    <span>@(online == 0 ? "No devices are connected." : $"{Fmt.Plural(online, "device is", "devices are")} connected.")</span>
+                }
+            </p>
+        </div>
+    </div>
     @if (status is not null)
     {
-        <span>@(status.InternetReachable ? "The internet is reachable." : "The internet is not reachable right now.") </span>
-        <span>@(online == 0 ? "No devices are connected." : $"{Fmt.Plural(online, "device is", "devices are")} connected.")</span>
+        <p class="panel flex items-center gap-3 px-4 py-2">
+            <Icon Name="@(status.InternetReachable ? "check" : "globe")" Class="@(status.InternetReachable ? "text-ok" : "text-warn")" />
+            <span>
+                <span class="block font-bold">@(status.InternetReachable ? "Online" : "No internet")</span>
+                <span class="block text-sm text-muted">Running for @Fmt.Uptime(status.UptimeSeconds)</span>
+            </span>
+        </p>
     }
-</p>
+</div>
 
 @* The wall itself: internet on one side, the home network on the other, and what is let through in between. *@
-<section aria-label="How traffic passes the firewall" class="panel mt-8 grid gap-0 overflow-hidden md:grid-cols-[1fr_auto_1fr]">
-    <div class="p-5">
-        <h2 class="font-bold text-muted">Internet side</h2>
-        <p class="mt-1 text-2xl font-bold">@(State.Wan?.Addresses.FirstOrDefault()?.Split('/')[0] ?? "No address")</p>
-        <p class="text-sm text-muted">Port @Config.WanInterface, @(State.Wan?.IsUp == true ? "cable connected" : "no cable detected")</p>
-        <dl class="mt-4 flex gap-6">
-            <div><dt class="text-sm text-muted">Coming in</dt><dd class="whitespace-nowrap text-lg font-bold">@Fmt.Rate(_downRate)</dd></div>
-            <div><dt class="text-sm text-muted">Going out</dt><dd class="whitespace-nowrap text-lg font-bold">@Fmt.Rate(_upRate)</dd></div>
+<section aria-label="How traffic passes the firewall" class="mt-8 grid gap-4 lg:grid-cols-3">
+    <div class="card min-w-0">
+        <h2 class="flex items-center gap-3 text-lg font-bold"><Icon Name="globe" Class="h-9 w-9 text-brand" />Internet side</h2>
+        <p class="mt-3 text-3xl font-bold">@(State.Wan?.Addresses.FirstOrDefault()?.Split('/')[0] ?? "No address")</p>
+        <p class="mt-1 flex items-center gap-2 @(wanUp ? "text-ok" : "text-warn")">
+            @if (wanUp) { <Icon Name="check" /> }
+            <span class="font-semibold">@(wanUp ? "Connected" : "No cable detected")</span>
+            <span class="text-sm text-muted">Port @Config.WanInterface</span>
+        </p>
+        <dl class="mt-4 flex flex-wrap gap-x-8 gap-y-2 border-t border-line pt-4">
+            <div class="flex items-center gap-2">
+                <Icon Name="down" Class="text-down" />
+                <div><dt class="text-sm text-muted">Coming in</dt><dd class="whitespace-nowrap text-lg font-bold">@Fmt.Rate(_downRate)</dd></div>
+            </div>
+            <div class="flex items-center gap-2">
+                <Icon Name="up" Class="text-up" />
+                <div><dt class="text-sm text-muted">Going out</dt><dd class="whitespace-nowrap text-lg font-bold">@Fmt.Rate(_upRate)</dd></div>
+            </div>
         </dl>
     </div>
 
-    <div class="flex items-center gap-4 border-y border-line bg-sunk p-5 md:w-64 md:flex-col md:justify-center md:border-x md:border-y-0 md:text-center">
-        <Stakes Count="7" Class="@($"h-12 shrink-0 {(protectedNow ? "text-pine" : "text-muted")}")" />
-        <p>
-            <a class="font-bold underline underline-offset-4" href="/ports">@Fmt.Plural(openPorts, "open port", "open ports")</a>
-            <span class="text-muted">and</span>
+    <div class="card @(protectedNow ? "card-ok" : "") flex flex-col items-center justify-center text-center">
+        <Icon Name="@(protectedNow ? "shield-check" : "shield")" Class="@($"h-16 w-16 {(protectedNow ? "text-ok" : "text-muted")}")" />
+        <h2 class="mt-2 text-lg font-bold">Open ports</h2>
+        <p><a class="text-5xl font-extrabold @(protectedNow ? "text-ok" : "") underline-offset-4 hover:underline" href="/ports" aria-label="@Fmt.Plural(openPorts, "open port", "open ports")">@openPorts</a></p>
+        <p class="mt-1">
             <a class="font-bold underline underline-offset-4" href="/rules">@Fmt.Plural(rules, "rule", "rules")</a>
             <span class="block text-sm text-muted">Everything else from the internet is turned away.</span>
         </p>
     </div>
 
-    <div class="p-5">
-        <h2 class="font-bold text-muted">Your network</h2>
-        <p class="mt-1 text-2xl font-bold">@Config.LanAddress</p>
-        <p class="text-sm text-muted">Port @Config.LanInterface, @(State.Lan?.IsUp == true ? "cable connected" : "no cable detected")</p>
-        <p class="mt-4"><a class="font-bold underline underline-offset-4" href="/devices">@Fmt.Plural(online, "device", "devices") connected</a></p>
-        @{ var offNow = AccessPlan.OffNow(Config.Access, DateTimeOffset.UtcNow, DateTime.Now).Count; }
-        @if (offNow > 0)
-        {
-            <p class="mt-1 text-sm text-muted"><a class="font-bold text-ink underline underline-offset-4" href="/devices">@Fmt.Plural(offNow, "device has", "devices have")</a> the internet switched off right now.</p>
-        }
-        <p class="mt-1 text-sm text-muted">Content filter: <a class="font-bold text-ink underline underline-offset-4" href="/filter">@Fmt.FilterLevel(Config.Filter.Level)</a></p>
+    <div class="card card-up min-w-0">
+        <h2 class="flex items-center gap-3 text-lg font-bold"><Icon Name="ports" Class="h-9 w-9 text-up" />Your network</h2>
+        <p class="mt-3 text-3xl font-bold">@Config.LanAddress</p>
+        <p class="mt-1 flex items-center gap-2 @(lanUp ? "text-ok" : "text-warn")">
+            @if (lanUp) { <Icon Name="check" /> }
+            <span class="font-semibold">@(lanUp ? "Cable connected" : "No cable detected")</span>
+            <span class="text-sm text-muted">Port @Config.LanInterface</span>
+        </p>
+        <div class="mt-4 space-y-2 border-t border-line pt-4">
+            <p class="flex items-center gap-2"><Icon Name="devices" Class="text-muted" /><a class="font-bold underline underline-offset-4" href="/devices">@Fmt.Plural(online, "device", "devices") connected</a></p>
+            @{ var offNow = AccessPlan.OffNow(Config.Access, DateTimeOffset.UtcNow, DateTime.Now).Count; }
+            @if (offNow > 0)
+            {
+                <p class="flex items-center gap-2 text-sm text-muted"><Icon Name="clock" /><span><a class="font-bold text-ink underline underline-offset-4" href="/devices">@Fmt.Plural(offNow, "device has", "devices have")</a> the internet switched off right now.</span></p>
+            }
+            <p class="flex flex-wrap items-center gap-2 text-sm text-muted"><Icon Name="filter" />Content filter: <a class="tag bg-brand-soft text-ink underline-offset-4 hover:underline" href="/filter">@Fmt.FilterLevel(Config.Filter.Level)</a></p>
+        </div>
     </div>
 </section>
 
-<div class="mt-8 grid gap-8 lg:grid-cols-[3fr_2fr]">
-    <section aria-labelledby="traffic-title">
-        <h2 id="traffic-title" class="text-xl font-bold">Internet traffic over the last two minutes</h2>
+<div class="mt-4 grid gap-4 lg:grid-cols-[3fr_2fr]">
+    <section aria-labelledby="traffic-title" class="panel min-w-0 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="traffic-title" class="flex items-center gap-3 text-xl font-bold"><Icon Name="chart" Class="h-6 w-6 text-brand" />Internet traffic</h2>
+            <p class="text-sm text-muted">The last two minutes</p>
+        </div>
         @if (_samples.Count < 2)
         {
             <p class="mt-3 text-muted" role="status">Measuring. The chart appears after a few seconds.</p>
@@ -71,31 +111,40 @@
         else
         {
             var max = Math.Max(1, _samples.Max(s => Math.Max(s.Down, s.Up)));
-            <svg viewBox="0 0 600 140" class="mt-3 w-full" role="img" aria-label="@($"Traffic chart. Peak {Fmt.Rate(max)}.")" preserveAspectRatio="none">
-                <line x1="0" y1="139" x2="600" y2="139" stroke="var(--line)" stroke-width="1" />
-                <polyline fill="none" stroke="var(--pine)" stroke-width="2.5" stroke-linejoin="round" points="@Points(s => s.Down, max)" />
-                <polyline fill="none" stroke="var(--ochre)" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round" points="@Points(s => s.Up, max)" />
-            </svg>
-            <p class="mt-2 flex flex-wrap gap-x-6 text-sm text-muted">
-                <span><span class="mr-1 inline-block h-0.5 w-5 bg-pine align-middle"></span>Coming in</span>
-                <span><span class="mr-1 inline-block w-5 border-t-2 border-dashed border-ochre align-middle"></span>Going out</span>
-                <span>Peak @Fmt.Rate(max)</span>
+            <div class="mt-4 flex gap-3">
+                <div aria-hidden="true" class="flex flex-col justify-between whitespace-nowrap text-right text-xs text-muted">
+                    <span>@Fmt.Rate(max)</span><span>@Fmt.Rate(max / 2)</span><span>0</span>
+                </div>
+                <svg viewBox="0 0 600 140" class="h-40 min-w-0 flex-1" role="img" aria-label="@($"Traffic chart. Peak {Fmt.Rate(max)}.")" preserveAspectRatio="none">
+                    @foreach (var y in new[] { 6, 71, 136 })
+                    {
+                        <line x1="0" y1="@y" x2="600" y2="@y" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke" />
+                    }
+                    <polygon fill="var(--down)" fill-opacity="0.18" points="@Area(s => s.Down, max)" />
+                    <polygon fill="var(--up)" fill-opacity="0.18" points="@Area(s => s.Up, max)" />
+                    <polyline fill="none" stroke="var(--down)" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="@Points(s => s.Down, max)" />
+                    <polyline fill="none" stroke="var(--up)" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="@Points(s => s.Up, max)" />
+                </svg>
+            </div>
+            <p class="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted">
+                <span><span class="mr-2 inline-block h-0.5 w-5 bg-down align-middle"></span>Coming in <strong class="text-ink">@Fmt.Rate(_downRate)</strong></span>
+                <span><span class="mr-2 inline-block w-5 border-t-2 border-dashed border-up align-middle"></span>Going out <strong class="text-ink">@Fmt.Rate(_upRate)</strong></span>
             </p>
         }
     </section>
 
-    <section aria-labelledby="attention-title">
-        <h2 id="attention-title" class="text-xl font-bold">Needs your attention</h2>
+    <section aria-labelledby="attention-title" class="panel min-w-0 p-5">
+        <h2 id="attention-title" class="flex items-center gap-3 text-xl font-bold"><Icon Name="bell" Class="@($"h-6 w-6 {(attention.Count == 0 ? "text-muted" : "text-warn")}")" />Needs your attention</h2>
         @if (attention.Count == 0)
         {
-            <p class="mt-3 text-muted">Nothing right now. Palisade will list problems here when it finds them.</p>
+            <p class="mt-4 flex items-start gap-3"><Icon Name="check" Class="mt-0.5 text-ok" /><span><strong class="block">Nothing right now.</strong><span class="text-muted">Palisade will list problems here when it finds them.</span></span></p>
         }
         else
         {
-            <ul class="mt-3 space-y-3">
+            <ul class="mt-4 space-y-3">
                 @foreach (var (text, href, link) in attention)
                 {
-                    <li class="rounded-md border border-ochre bg-ochre-soft p-3">
+                    <li class="rounded-lg border border-warn bg-warn-soft p-3">
                         @text <a class="font-bold underline underline-offset-4" href="@href">@link</a>
                     </li>
                 }
@@ -103,7 +152,7 @@
         }
         @if (status is not null)
         {
-            <p class="mt-6 text-sm text-muted">@status.Hostname has been running for @Fmt.Uptime(status.UptimeSeconds).</p>
+            <p class="mt-6 flex items-center gap-2 border-t border-line pt-4 text-sm text-muted"><Icon Name="clock" />@status.Hostname has been running for @Fmt.Uptime(status.UptimeSeconds).</p>
         }
     </section>
 </div>
@@ -113,46 +162,49 @@
     var top = usage.Take(8).ToList();
     var scale = Math.Max(1, top.Select(u => Math.Max(Measure(u, down: true), Measure(u, down: false))).DefaultIfEmpty(1).Max());
 }
-<section aria-labelledby="usage-title" class="mt-10">
+<section aria-labelledby="usage-title" class="panel mt-4 p-5">
     <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div>
-            <h2 id="usage-title" class="text-xl font-bold">Who is using the internet</h2>
-            <p class="field-hint">@(_byRate ? "Ordered by speed over the last few seconds." : $"Ordered by total use {SinceText()}.")</p>
+        <div class="flex items-center gap-3">
+            <Icon Name="people" Class="h-9 w-9 text-brand" />
+            <div>
+                <h2 id="usage-title" class="text-xl font-bold">Who is using the internet</h2>
+                <p class="text-sm text-muted">@(_byRate ? "Ordered by speed over the last few seconds." : $"Ordered by total use {SinceText()}.")</p>
+            </div>
         </div>
         <div role="group" aria-label="Order the list by" class="flex gap-1">
-            <button type="button" class="btn @(_byRate ? "" : "border-pine bg-pine-soft")" aria-pressed="@(_byRate ? "false" : "true")" @onclick="() => _byRate = false">Total</button>
-            <button type="button" class="btn @(_byRate ? "border-pine bg-pine-soft" : "")" aria-pressed="@(_byRate ? "true" : "false")" @onclick="() => _byRate = true">Right now</button>
+            <button type="button" class="btn @(_byRate ? "" : "btn-primary")" aria-pressed="@(_byRate ? "false" : "true")" @onclick="() => _byRate = false">Total</button>
+            <button type="button" class="btn @(_byRate ? "btn-primary" : "")" aria-pressed="@(_byRate ? "true" : "false")" @onclick="() => _byRate = true">Right now</button>
         </div>
     </div>
 
     @if (State.Usage is null)
     {
-        <p class="mt-3 text-muted" role="status">Measuring.</p>
+        <p class="mt-4 text-muted" role="status">Measuring.</p>
     }
     else if (top.Count == 0)
     {
-        <p class="panel mt-3 p-4 text-muted">@(_byRate ? "No device is using the internet at this moment." : $"No device has used the internet {SinceText()}.")</p>
+        <p class="mt-4 text-muted">@(_byRate ? "No device is using the internet at this moment." : $"No device has used the internet {SinceText()}.")</p>
     }
     else
     {
-        <ol class="panel mt-3 divide-y divide-line">
+        <ol class="mt-3 divide-y divide-line">
             @foreach (var u in top)
             {
                 var device = devices.FirstOrDefault(d => d.Address == u.Address);
                 var down = Measure(u, down: true);
                 var up = Measure(u, down: false);
-                <li class="grid items-center gap-x-5 gap-y-2 p-4 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]">
+                <li class="grid items-center gap-x-5 gap-y-2 py-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]">
                     <div class="min-w-0">
                         <p class="truncate font-bold">@(device?.Name ?? "Unknown device")</p>
                         <p class="text-sm text-muted">@u.Address</p>
                     </div>
-                    <div aria-hidden="true" class="space-y-1">
-                        <div class="h-2.5 rounded-sm bg-pine" style="width: @Width(down, scale)"></div>
-                        <div class="h-1.5 rounded-sm bg-ochre" style="width: @Width(up, scale)"></div>
+                    <div aria-hidden="true" class="space-y-1.5">
+                        <div class="h-2 rounded-full bg-down" style="width: @Width(down, scale)"></div>
+                        <div class="h-2 rounded-full bg-up" style="width: @Width(up, scale)"></div>
                     </div>
                     <p class="whitespace-nowrap text-sm sm:text-right">
-                        <span class="block"><span class="font-bold">@Show(down)</span> <span class="text-muted">coming in</span></span>
-                        <span class="block"><span class="font-bold">@Show(up)</span> <span class="text-muted">going out</span></span>
+                        <span class="block"><span class="font-bold">@Show(down)</span> <span class="mx-1 inline-block h-2 w-2 rounded-full bg-down" aria-hidden="true"></span><span class="text-muted">coming in</span></span>
+                        <span class="block"><span class="font-bold">@Show(up)</span> <span class="mx-1 inline-block h-2 w-2 rounded-full bg-up" aria-hidden="true"></span><span class="text-muted">going out</span></span>
                     </p>
                 </li>
             }
@@ -162,7 +214,7 @@
             <p class="mt-2 text-sm text-muted">And @Fmt.Plural(usage.Count - top.Count, "more device", "more devices") using less than these.</p>
         }
     }
-    <p class="mt-2 text-sm text-muted">Counts traffic between your devices and the internet. Totals start again from zero if the firewall restarts.</p>
+    <p class="mt-3 text-sm text-muted">Counts traffic between your devices and the internet. Totals start again from zero if the firewall restarts.</p>
 </section>
 
 @code {
@@ -231,6 +283,10 @@
     private string Points(Func<(double Down, double Up), double> pick, double max) =>
         string.Join(' ', _samples.Select((s, i) => string.Create(CultureInfo.InvariantCulture,
             $"{i * 600.0 / 59:0.#},{136 - pick(s) / max * 130:0.#}")));
+
+    // The same line, closed along the bottom edge so it can be filled.
+    private string Area(Func<(double Down, double Up), double> pick, double max) =>
+        string.Create(CultureInfo.InvariantCulture, $"0,136 {Points(pick, max)} {(_samples.Count - 1) * 600.0 / 59:0.#},136");
 
     private IEnumerable<(string Text, string Href, string Link)> Attention()
     {

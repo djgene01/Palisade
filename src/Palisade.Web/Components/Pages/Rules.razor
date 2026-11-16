@@ -31,7 +31,7 @@
                     <Toggle Value="rule.Enabled" ValueChanged="on => SaveAsync(c => c.Rules.First(r => r.Id == rule.Id).Enabled = on)" Label="@($"{rule.Name} is switched on")" />
                     <div class="min-w-0 flex-1 basis-56">
                         <p class="text-lg font-bold">
-                            <span class="tag mr-1 @(rule.Action == RuleAction.Block ? "bg-brick-soft text-brick" : "bg-pine-soft text-ink")">@(rule.Action == RuleAction.Block ? "Block" : "Allow")</span>
+                            <span class="tag mr-1 @(rule.Action == RuleAction.Block ? "bg-danger-soft text-danger" : "bg-brand-soft text-ink")">@(rule.Action == RuleAction.Block ? "Block" : "Allow")</span>
                             @rule.Name
                         </p>
                         <p class="text-muted">@Describe(rule)</p>

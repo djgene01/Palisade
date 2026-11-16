@@ -8,7 +8,7 @@
 <div aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center p-3 sm:p-5">
     @if (_phase != Phase.Idle)
     {
-        <div class="pointer-events-auto w-full max-w-xl rounded-lg border-2 p-4 shadow-lg @(_phase is Phase.Unsure ? "border-ochre bg-ochre-soft" : "border-pine bg-surface")">
+        <div class="pointer-events-auto w-full max-w-xl rounded-lg border-2 p-4 shadow-lg @(_phase is Phase.Unsure ? "border-warn bg-warn-soft" : "border-brand bg-surface")">
             @switch (_phase)
             {
                 case Phase.Checking:

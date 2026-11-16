@@ -485,6 +485,59 @@ public class CoreTests
     }
 
     [Fact]
+    public void Extra_network_is_reachable_from_home_but_kept_off_the_internet()
+    {
+        var c = Sample();
+        c.ExtraNetworks.Add(new() { Name = "Cameras", Address = "192.168.10.254", Prefix = 24 });
+        Assert.Empty(ConfigValidator.Validate(c));
+
+        var lan = c.LanInterface;
+        var text = ConfigRenderer.Nftables(c);
+        Assert.Contains($"iifname \"{lan}\" oifname \"{lan}\" ip saddr 192.168.50.0/24 ip daddr 192.168.10.0/24 accept", text);
+        Assert.Contains($"oifname \"{lan}\" ip saddr 192.168.50.0/24 ip daddr 192.168.10.0/24 masquerade", text);
+        Assert.Contains("ip saddr 192.168.10.0/24 counter reject", text);
+        Assert.True(text.IndexOf("ip saddr 192.168.10.0/24 counter reject", StringComparison.Ordinal) < text.IndexOf("home network to internet", StringComparison.Ordinal));
+        Assert.Contains($"    address 192.168.50.1/24\n    up ip addr add 192.168.10.254/24 dev {lan}\n", ConfigRenderer.LanInterface(c));
+
+        c.ExtraNetworks[0].InternetAccess = true;
+        Assert.DoesNotContain("ip saddr 192.168.10.0/24 counter reject", ConfigRenderer.Nftables(c));
+        Assert.DoesNotContain("192.168.10.", ConfigRenderer.Nftables(Sample()));
+    }
+
+    [Theory]
+    [InlineData("192.168.50.9", 24)]   // inside the home network
+    [InlineData("192.168.10.0", 24)]   // the range's own reserved address
+    [InlineData("8.8.8.1", 24)]        // not a private range
+    [InlineData("192.168.10.254", 8)]  // size out of bounds
+    [InlineData("192.168.0.1", 16)]    // swallows the home network
+    public void Extra_network_with_a_bad_range_is_refused(string address, int prefix)
+    {
+        var c = Sample();
+        c.ExtraNetworks.Add(new() { Name = "Cameras", Address = address, Prefix = prefix });
+        Assert.NotEmpty(ConfigValidator.Validate(c));
+    }
+
+    [Fact]
+    public void Two_extra_networks_may_not_overlap()
+    {
+        var c = Sample();
+        c.ExtraNetworks.Add(new() { Name = "Cameras", Address = "192.168.10.254", Prefix = 24 });
+        c.ExtraNetworks.Add(new() { Name = "Printers", Address = "192.168.10.1", Prefix = 24 });
+        Assert.Contains(ConfigValidator.Validate(c), i => i.Message.Contains("overlaps"));
+    }
+
+    [Fact]
+    public void Only_the_makers_half_of_an_address_is_looked_up()
+    {
+        Assert.Equal("7cf666", Maker.Prefix("7C-F6-66-12-34-56"));
+        Assert.Null(Maker.Prefix("not an address"));
+        Assert.False(Maker.IsMadeUp("7c:f6:66:12:34:56"));
+        Assert.True(Maker.IsMadeUp("da:a1:19:00:00:01"));
+        Assert.Equal("Tuya Smart Inc.", Maker.Clean("  Tuya Smart\u0007 Inc. "));
+        Assert.Equal(60, Maker.Clean(new string('x', 200)).Length);
+    }
+
+    [Fact]
     public void Wired_internet_port_asks_for_an_address()
     {
         Assert.Equal("allow-hotplug enp1s0\niface enp1s0 inet dhcp\n", ConfigRenderer.Render(Sample()).WanInterface.Split('\n', 2)[1]);

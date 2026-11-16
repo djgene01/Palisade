@@ -10,6 +10,12 @@ public sealed record Device(string Name, string Address, string Mac, bool Online
     /// <summary>What the device is called without a name from the owner: its fixed-address name or what it called itself.</summary>
     public string OwnName { get; init; } = "";
     public bool Renamed { get; init; }
+    /// <summary>The company that made the device, when its hardware address tells us. Empty otherwise.</summary>
+    public string Maker { get; init; } = "";
+    /// <summary>True when the address is one the device invented for itself, which hides who made it.</summary>
+    public bool MadeUpAddress { get; init; }
+    /// <summary>True when neither the owner nor the device itself supplied a name.</summary>
+    public bool Unnamed { get; init; }
 
     /// <summary>Device names go into config files, so reduce whatever the device called itself to letters, digits and dashes.</summary>
     public string SafeName
@@ -18,13 +24,13 @@ public sealed record Device(string Name, string Address, string Mac, bool Online
         {
             var name = System.Text.RegularExpressions.Regex.Replace(Name, "[^A-Za-z0-9]+", "-").Trim('-');
             if (name.Length > 40) name = name[..40].Trim('-');
-            return name.Length == 0 || Name == "Unnamed device" ? $"device-{Mac.Replace(":", "")[^6..]}" : name;
+            return name.Length == 0 || Unnamed ? $"device-{Mac.Replace(":", "")[^6..]}" : name;
         }
     }
 }
 
 /// <summary>One per browser session: the loaded config and live status, plus the single path for saving changes.</summary>
-public sealed class FirewallState(IFirewallBackend backend)
+public sealed class FirewallState(IFirewallBackend backend, MakerLookup makers)
 {
     public FirewallConfig? Config { get; private set; }
     public SystemStatus? Status { get; private set; }
@@ -189,7 +195,15 @@ public sealed class FirewallState(IFirewallBackend backend)
         return [.. devices.Select(d =>
         {
             var given = Config.Names.FirstOrDefault(n => n.Mac == d.Mac)?.Name;
-            return d with { Access = Config.Access.FirstOrDefault(a => a.Mac == d.Mac), OwnName = d.Name, Name = given ?? d.Name, Renamed = given is not null };
+            var maker = makers.Find(d.Mac) ?? "";
+            var unnamed = d.Name == "Unnamed device";
+            // A device that never said what it is called is at least told apart by who made it.
+            var own = unnamed && maker.Length > 0 ? $"{maker} device" : d.Name;
+            return d with
+            {
+                Access = Config.Access.FirstOrDefault(a => a.Mac == d.Mac), OwnName = own, Name = given ?? own, Renamed = given is not null,
+                Maker = maker, MadeUpAddress = Core.Maker.IsMadeUp(d.Mac), Unnamed = unnamed,
+            };
         })];
     }
 }

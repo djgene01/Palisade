@@ -27,6 +27,8 @@ public sealed class FirewallConfig
     public bool AllowManagementFromWan { get; set; }
     /// <summary>A third port, usually the Wi-Fi, that only reaches the firewall's own page and remote login. Empty for none.</summary>
     public string MaintenanceInterface { get; set; } = "";
+    /// <summary>Other address ranges on the home network's cable, such as cameras with addresses set by hand.</summary>
+    public List<ExtraNetwork> ExtraNetworks { get; set; } = [];
     public DhcpSettings Dhcp { get; set; } = new();
     public List<PortForward> PortForwards { get; set; } = [];
     public List<FirewallRule> Rules { get; set; } = [];
@@ -48,6 +50,27 @@ public sealed class DhcpSettings
     public int LeaseHours { get; set; } = 12;
     public List<string> UpstreamDns { get; set; } = ["1.1.1.1", "9.9.9.9"];
     public List<Reservation> Reservations { get; set; } = [];
+}
+
+/// <summary>
+/// A second address range that shares the home network's cable. The firewall takes one address in it,
+/// so home devices can reach what lives there. Devices in it get no automatic addresses.
+/// </summary>
+public sealed class ExtraNetwork
+{
+    public string Id { get; set; } = NewId.Create();
+    public string Name { get; set; } = "";
+    /// <summary>The firewall's own address inside this range, such as 192.168.10.254.</summary>
+    public string Address { get; set; } = "";
+    public int Prefix { get; set; } = 24;
+    /// <summary>Off by default: cameras and the like have no need to talk to the internet.</summary>
+    public bool InternetAccess { get; set; }
+
+    public const int Max = 8;
+
+    public string Range() => Ip4.TryParse(Address, out var ip) && Prefix is >= 16 and <= 30
+        ? $"{ip.Network(Prefix)}/{Prefix.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+        : throw new InvalidOperationException($"Unsafe address in config: {Address}");
 }
 
 public sealed class Reservation

@@ -21,7 +21,7 @@
             }
             else
             {
-                <p class="mt-1 text-muted">Automatic addresses are off, so Palisade can't see devices join. <a class="font-bold text-pine underline underline-offset-4" href="/network">Turn them on in Network.</a></p>
+                <p class="mt-1 text-muted">Automatic addresses are off, so Palisade can't see devices join. <a class="font-bold text-brand underline underline-offset-4" href="/network">Turn them on in Network.</a></p>
             }
         </div>
     }
@@ -37,13 +37,15 @@
                     <div class="min-w-0 flex-1 basis-56">
                         <p class="truncate text-lg font-bold">@device.Name</p>
                         <p class="text-sm text-muted">@(device.Address.Length > 0 ? $"{device.Address} · " : "")@device.Mac</p>
+                        @if (device.Maker.Length > 0) { <p class="text-sm text-muted">Made by @device.Maker</p> }
+                        else if (device.MadeUpAddress) { <p class="text-sm text-muted">Uses a private address, which hides who made it</p> }
                         <p class="mt-1 flex flex-wrap gap-2">
-                            @if (pausedByHand) { <span class="tag bg-brick-soft text-brick">Internet paused@(access!.PausedUntil is { } until ? $" until {Clock(until)}" : "")</span> }
-                            else if (offTime is not null) { <span class="tag bg-brick-soft text-brick">Off time until @offTime.To</span> }
+                            @if (pausedByHand) { <span class="tag bg-danger-soft text-danger">Internet paused@(access!.PausedUntil is { } until ? $" until {Clock(until)}" : "")</span> }
+                            else if (offTime is not null) { <span class="tag bg-danger-soft text-danger">Off time until @offTime.To</span> }
                             @if (access is { OffTimes.Count: > 0 } && offTime is null) { <span class="tag bg-sunk text-ink">@Fmt.Plural(access.OffTimes.Count, "off time", "off times")</span> }
                             @if (!device.Online) { <span class="tag bg-sunk text-muted">Not connected now</span> }
-                            @if (device.Reservation is not null) { <span class="tag bg-pine-soft text-ink">Fixed address</span> }
-                            @if (device.BlockRule is not null) { <span class="tag bg-brick-soft text-brick">Blocked by a rule</span> }
+                            @if (device.Reservation is not null) { <span class="tag bg-brand-soft text-ink">Fixed address</span> }
+                            @if (device.BlockRule is not null) { <span class="tag bg-danger-soft text-danger">Blocked by a rule</span> }
                             @if (Config.Filter.Devices.FirstOrDefault(f => f.Mac == device.Mac) is { } own) { <a class="tag bg-sunk text-ink underline underline-offset-2" href="/filter">Own filter level: @Fmt.FilterLevel(own.Level)</a> }
                         </p>
                     </div>
@@ -141,8 +143,8 @@
                 @foreach (var day in Week)
                 {
                     var on = _days.Contains(day);
-                    <label class="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 @(on ? "border-pine bg-pine-soft" : "border-line")">
-                        <input type="checkbox" class="h-4 w-4 accent-pine" checked="@on" @onchange="() => Toggle(day)" />
+                    <label class="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 @(on ? "border-brand bg-brand-soft" : "border-line")">
+                        <input type="checkbox" class="h-4 w-4 accent-brand" checked="@on" @onchange="() => Toggle(day)" />
                         <span>@ShortDay(day)</span>
                     </label>
                 }

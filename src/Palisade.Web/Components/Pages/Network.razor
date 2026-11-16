@@ -31,7 +31,7 @@
         </div>
         @if (_draft.LanAddress != Config.LanAddress)
         {
-            <p class="mt-3 rounded-md border border-ochre bg-ochre-soft p-3">
+            <p class="mt-3 rounded-md border border-warn bg-warn-soft p-3">
                 After saving, this page moves to <strong>http://@_draft.LanAddress:@PalisadeDefaults.WebPort</strong>. Reconnect your device, open that address and sign in within @PalisadeDefaults.ConfirmSeconds seconds, or the old address comes back.
             </p>
         }
@@ -68,9 +68,55 @@
             <p class="field-hint">Where the firewall looks up website names for your devices. Separate addresses with commas. Leave empty to use whatever the internet side provides.</p>
             @if (Config.Filter.Level != FilterLevel.Off)
             {
-                <p class="field-hint">The <a class="font-bold text-pine underline underline-offset-4" href="/filter">content filter</a> is on, so lookups go to its filtering service instead. These servers are still used for devices set to "No filtering" and for sites you always allow.</p>
+                <p class="field-hint">The <a class="font-bold text-brand underline underline-offset-4" href="/filter">content filter</a> is on, so lookups go to its filtering service instead. These servers are still used for devices set to "No filtering" and for sites you always allow.</p>
             }
         </div>
+    </section>
+
+    <section aria-labelledby="extra-title">
+        <h2 id="extra-title" class="text-xl font-bold">Extra networks</h2>
+        <p class="mt-1 text-muted">For devices on the same cables as your network whose addresses were set by hand in another range, such as cameras on 192.168.10.x. The firewall takes one free address in that range, and your devices can then reach everything in it. Devices there cannot start a connection to yours.</p>
+        @foreach (var net in _draft.ExtraNetworks)
+        {
+            <fieldset class="mt-4 rounded-md border border-line p-4">
+                <legend class="px-1 font-bold">@(net.Name.Length > 0 ? net.Name : "New network")</legend>
+                <div class="grid gap-4 sm:grid-cols-3">
+                    <div>
+                        <label for="extra-name-@net.Id" class="field-label">Name</label>
+                        <input id="extra-name-@net.Id" class="input" maxlength="40" @bind="net.Name" />
+                    </div>
+                    <div>
+                        <label for="extra-address-@net.Id" class="field-label">Firewall address there</label>
+                        <input id="extra-address-@net.Id" class="input" inputmode="decimal" placeholder="192.168.10.254" @bind="net.Address" />
+                    </div>
+                    <div>
+                        <label for="extra-size-@net.Id" class="field-label">Network size</label>
+                        <select id="extra-size-@net.Id" class="input" @bind="net.Prefix">
+                            <option value="24">Up to 253 devices (/24)</option>
+                            <option value="23">Up to 509 devices (/23)</option>
+                            <option value="22">Up to 1021 devices (/22)</option>
+                            <option value="16">Up to 65,533 devices (/16)</option>
+                            @if (net.Prefix is not (24 or 23 or 22 or 16))
+                            {
+                                <option value="@net.Prefix">/@net.Prefix</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <p class="field-hint">Pick an address no device there uses. With 192.168.10.254 and the size /24, the range is 192.168.10.1 to 192.168.10.254.</p>
+                <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                        <Toggle @bind-Value="net.InternetAccess" Label="@($"Let devices in {(net.Name.Length > 0 ? net.Name : "this network")} use the internet")" />
+                        <span>Let these devices use the internet</span>
+                    </div>
+                    <button type="button" class="btn" @onclick="() => _draft.ExtraNetworks.Remove(net)">Remove</button>
+                </div>
+            </fieldset>
+        }
+        @if (_draft.ExtraNetworks.Count < ExtraNetwork.Max)
+        {
+            <button type="button" class="btn mt-4" @onclick="() => _draft.ExtraNetworks.Add(new())">Add a network</button>
+        }
     </section>
 
     <section aria-labelledby="wan-title">
@@ -163,7 +209,7 @@
             <Problems Issues="_wifiIssues" />
             @if (_wifiDone)
             {
-                <p role="status" class="rounded-md border border-pine bg-pine-soft p-3 font-semibold">The firewall has joined @State.Wifi?.Ssid.</p>
+                <p role="status" class="rounded-md border border-brand bg-brand-soft p-3 font-semibold">The firewall has joined @State.Wifi?.Ssid.</p>
             }
             <button type="submit" class="btn" disabled="@_wifiBusy">@(_wifiBusy ? "Joining, this takes a moment" : "Join this Wi-Fi")</button>
         </form>
@@ -243,6 +289,8 @@
             c.NatEnabled = _draft.NatEnabled;
             c.AllowManagementFromWan = _draft.AllowManagementFromWan;
             c.MaintenanceInterface = _draft.MaintenanceInterface;
+            c.ExtraNetworks = [.. _draft.ExtraNetworks.Select(n => new ExtraNetwork
+                { Id = n.Id, Name = n.Name.Trim(), Address = n.Address.Trim(), Prefix = n.Prefix, InternetAccess = n.InternetAccess })];
             c.Dhcp.Enabled = _draft.Dhcp.Enabled;
             c.Dhcp.RangeStart = _draft.Dhcp.RangeStart.Trim();
             c.Dhcp.RangeEnd = _draft.Dhcp.RangeEnd.Trim();

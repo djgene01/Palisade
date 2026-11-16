@@ -19,8 +19,8 @@
                 @foreach (var level in FilterPlan.AllLevels)
                 {
                     var chosen = Config.Filter.Level == level;
-                    <label class="panel flex min-h-14 cursor-pointer items-start gap-3 p-3 @(chosen ? "border-pine bg-pine-soft" : "")">
-                        <input type="radio" name="level" class="mt-1 h-5 w-5 shrink-0 accent-pine" checked="@chosen" @onchange="() => RunAsync(c => c.Filter.Level = level)" />
+                    <label class="panel flex min-h-14 cursor-pointer items-start gap-3 p-3 @(chosen ? "border-brand bg-brand-soft" : "")">
+                        <input type="radio" name="level" class="mt-1 h-5 w-5 shrink-0 accent-brand" checked="@chosen" @onchange="() => RunAsync(c => c.Filter.Level = level)" />
                         <span>
                             <span class="font-bold">@Fmt.FilterLevel(level)</span>
                             <span class="block text-muted">@Fmt.FilterLevelDetail(level)</span>

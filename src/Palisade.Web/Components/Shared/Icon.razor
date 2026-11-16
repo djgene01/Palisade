@@ -1,0 +1,30 @@
+@* Small line drawings, all on one 24 by 24 grid with one stroke weight. Decorative: the text beside each one carries the meaning. *@
+<svg class="icon @Class" viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)(Shapes.GetValueOrDefault(Name) ?? ""))</svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public string Class { get; set; } = "";
+
+    private static readonly Dictionary<string, string> Shapes = new()
+    {
+        ["home"] = """<path d="M3 11l9-8 9 8M5 10v10h14V10M10 20v-6h4v6"/>""",
+        ["devices"] = """<path d="M3 4h18v12H3zM8 20h8M12 16v4"/>""",
+        ["shield"] = """<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>""",
+        ["shield-check"] = """<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>""",
+        ["ports"] = """<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/>""",
+        ["rules"] = """<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/>""",
+        ["globe"] = """<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>""",
+        ["advanced"] = """<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" stroke-dasharray="4 2.28"/>""",
+        ["sun"] = """<circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>""",
+        ["moon"] = """<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>""",
+        ["sign-out"] = """<path d="M10 4H5v16h5M15 8l4 4-4 4M19 12H9"/>""",
+        ["down"] = """<path d="M12 4v16M6 14l6 6 6-6"/>""",
+        ["up"] = """<path d="M12 20V4M6 10l6-6 6 6"/>""",
+        ["bell"] = """<path d="M6 16v-5a6 6 0 0112 0v5l2 2H4zM10 21h4"/>""",
+        ["clock"] = """<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>""",
+        ["people"] = """<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.5-4 3-6 6.5-6s6 2 6.5 6M16 4.8a3.5 3.5 0 010 6.4M18 14.3c2 .8 3.2 2.7 3.5 5.7"/>""",
+        ["chart"] = """<path d="M5 20v-8M12 20V5M19 20v-9"/>""",
+        ["filter"] = """<path d="M3 5h18l-7 8v6l-4-2v-4z"/>""",
+        ["check"] = """<path d="M5 12l5 5 9-10"/>""",
+    };
+}

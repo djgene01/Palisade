@@ -8,44 +8,53 @@
 
 @if (State.Status?.Simulated == true)
 {
-    <p class="border-b border-ochre bg-ochre-soft px-4 py-2 text-center text-sm font-semibold text-ink">
+    <p class="border-b border-warn bg-warn-soft px-4 py-2 text-center text-sm font-semibold text-ink">
         Demo mode: this is a simulated network for trying the interface. Nothing here controls a real firewall.
     </p>
 }
 
-<div class="mx-auto flex min-h-dvh max-w-6xl flex-col md:flex-row">
-    <header class="border-line md:w-56 md:shrink-0 md:border-r">
-        <div class="flex items-center justify-between gap-3 px-4 py-4 md:px-5 md:pt-7">
-            <a href="/" class="flex items-end gap-2 text-pine">
-                <Stakes Count="3" Class="h-7" />
-                <span class="text-xl font-extrabold leading-none tracking-tight text-ink">Palisade</span>
+<div class="flex min-h-dvh flex-col md:flex-row">
+    <header class="border-line bg-side md:sticky md:top-0 md:flex md:h-dvh md:w-60 md:shrink-0 md:flex-col md:overflow-y-auto md:border-r">
+        <div class="px-4 py-4 md:px-5 md:pt-7">
+            <a href="/" class="flex items-center gap-3 md:flex-col md:items-start md:gap-2">
+                @* The mark: the palisade's pointed stakes, standing inside a shield. *@
+                <svg class="h-10 w-9 shrink-0 text-brand md:h-16 md:w-14" viewBox="0 0 48 56" aria-hidden="true">
+                    <path d="M24 2l20 7v17c0 14-8.5 23-20 28C12.500 49 4 40 4 26V9z" fill="var(--brand-soft)" stroke="currentColor" stroke-width="3" stroke-linejoin="round" />
+                    <path d="M13 22l4-5 4 5v18h-8zM20 18l4-5 4 5v24h-8zM27 22l4-5 4 5v18h-8z" fill="currentColor" stroke="var(--brand-soft)" stroke-width="1.5" stroke-linejoin="round" />
+                </svg>
+                <span>
+                    <span class="block text-2xl font-extrabold leading-none tracking-tight text-ink">Palisade</span>
+                    <span class="mt-1 block text-sm text-muted">Home firewall</span>
+                </span>
             </a>
         </div>
 
         @if (Ready)
         {
-            <nav aria-label="Main" class="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:px-3 md:pt-3">
-                @foreach (var (href, label) in Links)
+            <nav aria-label="Main" class="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:pt-3">
+                @foreach (var (href, label, icon) in Links)
                 {
-                    <NavLink href="@href" Match="@(href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)"
-                             class="flex min-h-11 shrink-0 items-center rounded-md px-3 font-semibold text-muted hover:bg-sunk hover:text-ink"
-                             ActiveClass="bg-pine-soft !text-ink">@label</NavLink>
+                    <NavLink href="@href" Match="@(href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)" class="nav-link" ActiveClass="active">
+                        <Icon Name="@icon" />@label
+                    </NavLink>
                 }
             </nav>
         }
 
-        <div class="hidden px-3 pt-6 md:block">
-            <button type="button" class="btn btn-quiet w-full justify-start" @onclick="ToggleThemeAsync">@(_dark ? "Use light colours" : "Use dark colours")</button>
+        <div class="hidden border-t border-line px-3 py-4 md:mx-3 md:mt-4 md:block md:px-0">
+            <button type="button" class="nav-link w-full cursor-pointer" @onclick="ToggleThemeAsync">
+                <Icon Name="@(_dark ? "sun" : "moon")" />@(_dark ? "Use light colours" : "Use dark colours")
+            </button>
             <form method="post" action="/logout">
-                <button type="submit" class="btn btn-quiet w-full justify-start">Sign out</button>
+                <button type="submit" class="nav-link w-full cursor-pointer"><Icon Name="sign-out" />Sign out</button>
             </form>
         </div>
     </header>
 
-    <main id="main" class="min-w-0 flex-1 px-4 pb-32 pt-2 md:px-10 md:pt-8">
+    <main id="main" class="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 pb-32 pt-4 md:px-10 md:pt-8">
         @if (State.Error is not null && State.Config is null)
         {
-            <div role="alert" class="panel max-w-xl border-brick p-6">
+            <div role="alert" class="panel max-w-xl border-danger p-6">
                 <h1 class="text-2xl font-bold" tabindex="-1">Can't reach the firewall service</h1>
                 <p class="mt-2">The page loaded, but the part of Palisade that controls the network is not answering. Your network keeps running with the last saved rules.</p>
                 <p class="mt-2 text-muted">@State.Error</p>
@@ -80,10 +89,10 @@
 </div>
 
 @code {
-    private static readonly (string Href, string Label)[] Links =
+    private static readonly (string Href, string Label, string Icon)[] Links =
     [
-        ("/", "Overview"), ("/devices", "Devices"), ("/filter", "Content filter"), ("/ports", "Open ports"),
-        ("/rules", "Rules"), ("/network", "Network"), ("/advanced", "Advanced"),
+        ("/", "Overview", "home"), ("/devices", "Devices", "devices"), ("/filter", "Content filter", "shield"), ("/ports", "Open ports", "ports"),
+        ("/rules", "Rules", "rules"), ("/network", "Network", "globe"), ("/advanced", "Advanced", "advanced"),
     ];
 
     private bool _dark;

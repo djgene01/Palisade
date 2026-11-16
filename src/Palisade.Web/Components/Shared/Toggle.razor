@@ -1,7 +1,7 @@
 <button type="button" role="switch" aria-checked="@(Value ? "true" : "false")" aria-label="@Label" disabled="@Disabled"
         @onclick="() => ValueChanged.InvokeAsync(!Value)"
-        class="inline-flex h-11 w-16 shrink-0 cursor-pointer items-center rounded-full border-2 px-1 transition-colors disabled:cursor-not-allowed disabled:opacity-60 @(Value ? "border-pine bg-pine" : "border-muted bg-sunk")">
-    <span class="h-7 w-7 rounded-full transition-transform @(Value ? "translate-x-6 bg-on-pine" : "bg-muted")"></span>
+        class="inline-flex h-11 w-16 shrink-0 cursor-pointer items-center rounded-full border-2 px-1 transition-colors disabled:cursor-not-allowed disabled:opacity-60 @(Value ? "border-brand bg-brand" : "border-muted bg-sunk")">
+    <span class="h-7 w-7 rounded-full transition-transform @(Value ? "translate-x-6 bg-on-brand" : "bg-muted")"></span>
 </button>
 
 @code {

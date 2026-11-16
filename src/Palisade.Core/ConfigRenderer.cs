@@ -39,6 +39,9 @@ public static class ConfigRenderer
         var enforced = FilterPlan.Enforced(c);
         var instances = FilterPlan.InstanceLevels(c);
         const string dns = "meta l4proto { tcp, udp } th dport";
+        var home = Ip4.TryParse(c.LanAddress, out var lanIp)
+            ? $"{lanIp.Network(c.LanPrefix)}/{c.LanPrefix.ToString(CultureInfo.InvariantCulture)}"
+            : throw new InvalidOperationException($"Unsafe address in config: {c.LanAddress}");
         var sb = new StringBuilder();
         void L(string line = "") => sb.Append(line).Append('\n');
 
@@ -74,6 +77,14 @@ public static class ConfigRenderer
         L($"        iifname {lan} ether saddr @{AccessPlan.PausedSet} counter reject with icmpx type admin-prohibited comment \"paused or in an off time\"");
         L("        ct state established,related accept");
         L("        ct state invalid drop");
+        // Extra networks share the home port, so everything between them and the home network both arrives
+        // and leaves on that port. Home devices may start a conversation; devices there may only answer.
+        foreach (var n in c.ExtraNetworks)
+        {
+            L($"        iifname {lan} oifname {lan} ip saddr {home} ip daddr {n.Range()} accept comment {Quote("home network to " + n.Name)}");
+            if (!n.InternetAccess)
+                L($"        iifname {lan} oifname {wan} ip saddr {n.Range()} counter reject with icmpx type admin-prohibited comment {Quote(n.Name + " may not use the internet")}");
+        }
         if (enforced)
         {
             // Port 853 carries encrypted lookups that would pass straight by the filter. Devices set to
@@ -117,14 +128,15 @@ public static class ConfigRenderer
         L("        type nat hook postrouting priority srcnat; policy accept;");
         if (c.NatEnabled)
             L($"        oifname {wan} masquerade");
+        // A camera with a hand-set address often has no way back to another range. Arriving from the
+        // firewall's own address in its range, it can always answer.
+        foreach (var n in c.ExtraNetworks)
+            L($"        oifname {lan} ip saddr {home} ip daddr {n.Range()} masquerade comment {Quote("reach " + n.Name)}");
         L("    }");
         L("}");
         L();
         // Counts bytes per home-network address for the overview. It runs ahead of the filter chain
         // (which accepts most packets on its first lines) and never decides anything itself.
-        var home = Ip4.TryParse(c.LanAddress, out var lanIp)
-            ? $"{lanIp.Network(c.LanPrefix)}/{c.LanPrefix.ToString(CultureInfo.InvariantCulture)}"
-            : throw new InvalidOperationException($"Unsafe address in config: {c.LanAddress}");
         L($"table inet {UsageTable} {{");
         foreach (var set in new[] { UsageUpSet, UsageDownSet })
             L($"    set {set} {{ type ipv4_addr; size 4096; flags dynamic,timeout; counter; timeout 1d; }}");
@@ -229,7 +241,13 @@ public static class ConfigRenderer
     }
 
     public static string LanInterface(FirewallConfig c) =>
-        $"{Header}\nauto {Token(c.LanInterface)}\niface {Token(c.LanInterface)} inet static\n    address {Address(c.LanAddress)}/{c.LanPrefix.ToString(CultureInfo.InvariantCulture)}\n";
+        $"{Header}\nauto {Token(c.LanInterface)}\niface {Token(c.LanInterface)} inet static\n    address {LanAddresses(c)[0]}\n"
+        + string.Concat(LanAddresses(c).Skip(1).Select(a => $"    up ip addr add {a} dev {Token(c.LanInterface)}\n"));
+
+    /// <summary>Every address the home network port carries: the firewall's own first, then one per extra network.</summary>
+    public static IReadOnlyList<string> LanAddresses(FirewallConfig c) =>
+        [$"{Address(c.LanAddress)}/{c.LanPrefix.ToString(CultureInfo.InvariantCulture)}",
+         .. c.ExtraNetworks.Select(n => $"{Address(n.Address)}/{(n.Prefix is >= 16 and <= 30 ? n.Prefix : throw new InvalidOperationException("Unsafe network size in config.")).ToString(CultureInfo.InvariantCulture)}")];
 
     // The validator already rejects unsafe input. These re-check at the point of output so a
     // config that skipped validation can never smuggle syntax into a root-owned file.

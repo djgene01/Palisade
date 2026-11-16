@@ -58,6 +58,27 @@ public static partial class ConfigValidator
         bool Usable(Ip4 ip) => subnetKnown && ip.IsIn(lan, c.LanPrefix)
             && ip != lan.Network(c.LanPrefix) && ip != lan.Broadcast(c.LanPrefix);
 
+        if (c.ExtraNetworks.Count > ExtraNetwork.Max) Add("ExtraNetworks", $"At most {ExtraNetwork.Max} extra networks can be added.");
+        var ranges = new List<(Ip4 Address, int Prefix, string Name)>();
+        if (subnetKnown) ranges.Add((lan, c.LanPrefix, "your network"));
+        foreach (var n in c.ExtraNetworks)
+        {
+            var field = $"ExtraNetwork.{n.Id}";
+            if (!IsSafeName(n.Name)) Add(field, "Give the extra network a short name using letters, numbers and spaces.");
+            if (n.Prefix is < 16 or > 30) { Add(field, $"{n.Name}: pick a network size between /16 and /30."); continue; }
+            if (!Ip4.TryParse(n.Address, out var ip) || !ip.IsPrivate)
+            {
+                Add(field, $"{n.Name}: the firewall's address there must be a private address such as 192.168.10.254.");
+                continue;
+            }
+            if (ip == ip.Network(n.Prefix) || ip == ip.Broadcast(n.Prefix))
+                Add(field, $"{n.Name}: that address is reserved on that network. Try one ending in .254.");
+            foreach (var other in ranges)
+                if (ip.IsIn(other.Address, Math.Min(n.Prefix, other.Prefix)))
+                    Add(field, $"{n.Name}: this range overlaps {other.Name}. Each network needs a range of its own.");
+            ranges.Add((ip, n.Prefix, $"\"{n.Name}\""));
+        }
+
         var d = c.Dhcp;
         if (d.Enabled)
         {
