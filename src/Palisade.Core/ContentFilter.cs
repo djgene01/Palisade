@@ -14,6 +14,8 @@ public sealed class ContentFilter
     /// <summary>Sites that stay reachable even when a level would block them.</summary>
     public List<string> AllowedSites { get; set; } = [];
     public List<DeviceFilter> Devices { get; set; } = [];
+    /// <summary>Refuses the services that rent a home connection out to strangers, for every device at every level.</summary>
+    public bool BlockRelays { get; set; }
 }
 
 /// <summary>A device that uses a different level from the rest of the network. Keyed by hardware address, so it holds without a fixed IP.</summary>
@@ -68,6 +70,16 @@ public static class FilterPlan
         "dns.adguard-dns.com", "dns.nextdns.io", "doh.cleanbrowsing.org",
     ];
 
+    // Services that pay app makers, or the owner, to pass strangers' traffic through a home connection.
+    // Cheap TV boxes and "free" apps often carry them without saying so. Each name is the one the
+    // relay software must look up to join its network, so refusing it keeps the device out.
+    public static readonly string[] RelayNames =
+    [
+        "bright-sdk.com", "brdtnet.com", "lum-sdk.io", "luminati.io", "luminatinet.com",
+        "oxylabs.io", "honeygain.com", "packetstream.io", "pawns.app", "iproyal.com", "earnapp.com",
+        "peer2profit.com", "repocket.co", "traffmonetizer.com", "proxyrack.net", "infatica.io", "joinmassive.com",
+    ];
+
     public static string Name(FilterLevel level) => level.ToString().ToLowerInvariant();
 
     public static int Port(FilterLevel level) => 5380 + (int)level;
@@ -96,7 +108,7 @@ public static class FilterPlan
 
     /// <summary>When anything is filtered, lookups are forced through the firewall so a device can't pick its own name server.</summary>
     public static bool Enforced(FirewallConfig c) =>
-        c.Filter.Level != FilterLevel.Off || c.Filter.BlockedSites.Count > 0 || Overrides(c).Any();
+        c.Filter.Level != FilterLevel.Off || c.Filter.BlockedSites.Count > 0 || c.Filter.BlockRelays || c.Limits.Count > 0 || Overrides(c).Any();
 
     public static FilterLevel LevelFor(FirewallConfig c, string mac) =>
         c.Filter.Devices.FirstOrDefault(d => d.Mac == mac)?.Level ?? c.Filter.Level;

@@ -10,6 +10,27 @@ namespace Palisade.Agent;
 public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch
 {
     private readonly SemaphoreSlim _watchGate = new(1, 1);
+    private RelayTracker? _relays;
+    private string RelayFile => Path.Combine(dataDirectory, "relays.json");
+
+    /// <summary>Adds what the trap caught since the last look. Called from the usage loop, every 15 seconds.</summary>
+    private async Task NoteRelaysAsync(CancellationToken ct)
+    {
+        try
+        {
+            _relays ??= new RelayTracker(File.Exists(RelayFile)
+                ? System.Text.Json.JsonSerializer.Deserialize<List<RelaySighting>>(await File.ReadAllTextAsync(RelayFile, ct), PalisadeJson.Options) : null);
+            var seen = await RunAsync("nft", ["-j", "list", "set", "inet", "palisade", RelayPlan.SeenSet], ct);
+            // The set only exists while blocking is switched on; with it off there is nothing to add.
+            if (_relays.Record(DateTimeOffset.UtcNow, seen.ExitCode == 0 ? RelayPlan.ParseSeen(seen.Output) : []))
+                await WriteAtomicAsync(RelayFile, System.Text.Json.JsonSerializer.Serialize(_relays.Report(), PalisadeJson.Options), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Could not read which devices tried a connection-sharing service: {Message}", ex.Message);
+            _relays ??= new RelayTracker();
+        }
+    }
 
     public async Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default)
     {
@@ -175,8 +196,23 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         }
 
         // nftables.service loads this same file at boot, so protection never depends on this agent being up.
+        // Loading the rules empties every list, and a limited device would then be cut off from its allowed
+        // sites until it happened to look them up again. Remember what the lists hold and put it back.
+        var remembered = new Dictionary<string, List<string>>();
+        foreach (var limit in config.Limits)
+        {
+            var held = await RunAsync("nft", ["-j", "list", "set", "inet", "palisade", LimitPlan.SetName(limit.Mac)], ct);
+            if (held.ExitCode == 0) remembered[limit.Mac] = LimitPlan.ParseAddresses(held.Output);
+        }
         await WriteAtomicAsync(NftablesConf, files.Nftables, ct);
         await MustRunAsync("nft", ["-f", NftablesConf], ct);
+        if (LimitPlan.RestoreScript(remembered) is { Length: > 0 } restore)
+        {
+            var path = Path.Combine(dataDirectory, "limits.nft");
+            await File.WriteAllTextAsync(path, restore, ct);
+            var restored = await RunAsync("nft", ["-f", path], ct);
+            if (restored.ExitCode != 0) logger.LogWarning("Allowed addresses could not be put back: {Error}", restored.Error.Trim());
+        }
         // Loading the rules emptied the set of paused devices, so fill it again straight away.
         await SetAccessAsync(config.Access, forget: true, ct);
 
@@ -270,6 +306,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         status.FirewallActive = (await RunAsync("nft", ["list", "table", "inet", "palisade"], ct)).ExitCode == 0;
         status.DhcpRunning = (await RunAsync("systemctl", ["is-active", "--quiet", "dnsmasq"], ct)).ExitCode == 0;
         status.InternetReachable = await CheckInternetAsync(active, ct);
+        status.RelayDevices = _relays?.Report() ?? [];
         return status;
     }
 
@@ -286,7 +323,11 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
         try
         {
-            do { await GetUsageAsync(ct); }
+            do
+            {
+                await GetUsageAsync(ct);
+                await NoteRelaysAsync(ct);
+            }
             while (await timer.WaitForNextTickAsync(ct));
         }
         catch (OperationCanceledException) { }

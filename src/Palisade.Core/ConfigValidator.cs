@@ -175,6 +175,7 @@ public static partial class ConfigValidator
             if (!Enum.IsDefined(device.Level)) Add(field, $"{device.Name}: choose one of the filter levels.");
         }
 
+        issues.AddRange(LimitPlan.Validate(c.Limits));
         issues.AddRange(AccessPlan.Validate(c.Access));
         issues.AddRange(DeviceName.Validate(c.Names));
         return issues;

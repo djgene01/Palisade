@@ -33,6 +33,8 @@ public sealed class FirewallConfig
     public List<PortForward> PortForwards { get; set; } = [];
     public List<FirewallRule> Rules { get; set; } = [];
     public ContentFilter Filter { get; set; } = new();
+    /// <summary>Devices that may reach only chosen sites, such as a TV box that is only for YouTube.</summary>
+    public List<DeviceLimit> Limits { get; set; } = [];
     /// <summary>Pauses and schedules. Saved through its own path, so a pause holds without anyone confirming it.</summary>
     public List<DeviceAccess> Access { get; set; } = [];
     /// <summary>Names the owner gave to devices. Only ever shown on screen, never written into a system file.</summary>
@@ -149,6 +151,8 @@ public sealed class SystemStatus
     public bool InternetReachable { get; set; }
     /// <summary>Set while a change is waiting to be confirmed; it is undone when this reaches zero.</summary>
     public int? PendingSecondsLeft { get; set; }
+    /// <summary>Devices caught trying to reach a connection-sharing service in the last week, newest first.</summary>
+    public List<RelaySighting> RelayDevices { get; set; } = [];
 }
 
 public sealed record DhcpLease(DateTimeOffset Expires, string Mac, string Address, string? Hostname);

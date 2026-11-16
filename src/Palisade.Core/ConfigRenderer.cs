@@ -53,6 +53,11 @@ public static class ConfigRenderer
         L("table inet palisade {");
         // Filled by the agent from the clock: devices that are paused or inside one of their off times.
         L($"    set {AccessPlan.PausedSet} {{ type ether_addr; }}");
+        if (c.Filter.BlockRelays)
+            L($"    set {RelayPlan.SeenSet} {{ type ether_addr; size 1024; flags dynamic; counter; }}");
+        // Filled by the name server as a limited device looks its allowed sites up.
+        foreach (var limit in c.Limits)
+            L($"    set {LimitPlan.SetName(limit.Mac)} {{ type ipv4_addr; size 65535; }}");
         L();
         L("    chain input {");
         L("        type filter hook input priority filter; policy drop;");
@@ -75,6 +80,15 @@ public static class ConfigRenderer
         L("        type filter hook forward priority filter; policy drop;");
         // Ahead of the "established" line on purpose: a pause must also stop a video that is already playing.
         L($"        iifname {lan} ether saddr @{AccessPlan.PausedSet} counter reject with icmpx type admin-prohibited comment \"paused or in an off time\"");
+        if (c.Filter.BlockRelays)
+            L($"        iifname {lan} ip daddr {RelayPlan.TrapAddress} update @{RelayPlan.SeenSet} {{ ether saddr }} reject with icmpx type admin-prohibited comment \"tried a connection-sharing service\"");
+        // Ahead of the "established" line for the same reason as a pause: setting a limit must also cut
+        // what the device already has open. The clock is let through, since nothing secure works with a wrong one.
+        foreach (var limit in c.Limits)
+        {
+            L($"        iifname {lan} oifname {wan} ether saddr {Mac(limit.Mac)} udp dport 123 accept comment \"clock for a limited device\"");
+            L($"        iifname {lan} oifname {wan} ether saddr {Mac(limit.Mac)} ip daddr != @{LimitPlan.SetName(limit.Mac)} counter reject with icmpx type admin-prohibited comment \"limited to chosen sites\"");
+        }
         L("        ct state established,related accept");
         L("        ct state invalid drop");
         // Extra networks share the home port, so everything between them and the home network both arrives
@@ -197,6 +211,16 @@ public static class ConfigRenderer
         }
         L($"local=/{FilterPlan.CheckName}/");
         foreach (var site in c.Filter.BlockedSites) L($"local=/{Site(site)}/");
+        // Relay names get an answer, but one that leads to the trap: the firewall then sees which device came knocking.
+        if (c.Filter.BlockRelays)
+            foreach (var name in FilterPlan.RelayNames)
+            {
+                L($"address=/{Site(name)}/{RelayPlan.TrapAddress}");
+                L($"address=/{Site(name)}/::");
+            }
+        // Each allowed site's addresses go onto the list of every device allowed to reach it.
+        foreach (var site in c.Limits.SelectMany(LimitPlan.Sites).Distinct())
+            L($"nftset=/{Site(site)}/{string.Join(',', c.Limits.Where(l => LimitPlan.Sites(l).Contains(site)).Select(l => $"4#inet#palisade#{LimitPlan.SetName(l.Mac)}"))}");
         if (level == FilterLevel.Off) return;
         foreach (var name in FilterPlan.BypassNames) L($"local=/{Site(name)}/");
         foreach (var site in c.Filter.AllowedSites)

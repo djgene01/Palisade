@@ -585,6 +585,89 @@ public class CoreTests
     }
 
     [Fact]
+    public void Connection_sharing_services_are_refused_at_every_level_when_switched_on()
+    {
+        var c = Sample();
+        c.Filter.Level = FilterLevel.Off;
+        Assert.DoesNotContain("brdtnet.com", ConfigRenderer.Dnsmasq(c));
+
+        c.Filter.BlockRelays = true;
+        Assert.Empty(ConfigValidator.Validate(c));
+        Assert.Contains("address=/brdtnet.com/192.0.2.1\n", ConfigRenderer.Dnsmasq(c));
+        Assert.Contains("address=/oxylabs.io/::\n", ConfigRenderer.Dnsmasq(c));
+        // Whatever is sent to the trap is refused, and the sender noted, before any "already allowed" rule can pass it.
+        var rules = ConfigRenderer.Nftables(c);
+        Assert.Contains("ip daddr 192.0.2.1 update @relay_seen { ether saddr } reject", rules);
+        Assert.True(rules.IndexOf("@relay_seen {", StringComparison.Ordinal) < rules.LastIndexOf("ct state established", StringComparison.Ordinal));
+        // Lookups are forced through the firewall, or a device could simply ask another name server.
+        Assert.True(FilterPlan.Enforced(c));
+        Assert.Contains("redirect to :53", ConfigRenderer.Nftables(c));
+        Assert.All(FilterPlan.RelayNames, name => Assert.True(SiteName.IsValid(name)));
+    }
+
+    [Fact]
+    public void Devices_caught_by_the_trap_are_remembered_across_rule_reloads()
+    {
+        const string json = """{"nftables":[{"set":{"name":"relay_seen","elem":[{"elem":{"val":"18:FE:34:3D:E7:E6","counter":{"packets":5,"bytes":300}}}]}}]}""";
+        var seen = RelayPlan.ParseSeen(json);
+        Assert.Equal(5, seen["18:fe:34:3d:e7:e6"]);
+        Assert.Empty(RelayPlan.ParseSeen("nonsense"));
+
+        var start = new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero);
+        var tracker = new RelayTracker();
+        Assert.True(tracker.Record(start, seen));
+        Assert.False(tracker.Record(start.AddSeconds(15), seen));
+        // The rules were reloaded, so the kernel counts from zero again: 2 is new, not "3 fewer".
+        Assert.True(tracker.Record(start.AddSeconds(30), new Dictionary<string, long> { ["18:fe:34:3d:e7:e6"] = 2 }));
+        var sighting = Assert.Single(tracker.Report());
+        Assert.Equal(7, sighting.Attempts);
+        Assert.Equal(start.AddSeconds(30), sighting.LastSeen);
+
+        var restarted = new RelayTracker(tracker.Report());
+        Assert.Equal(7, Assert.Single(restarted.Report()).Attempts);
+        Assert.True(restarted.Record(start.AddDays(8), new Dictionary<string, long>()));
+        Assert.Empty(restarted.Report());
+    }
+
+    [Fact]
+    public void A_limited_device_reaches_only_addresses_of_its_allowed_sites()
+    {
+        var c = Sample();
+        c.Limits.Add(new() { Mac = "18:fe:34:3d:e7:e6", Name = "TV box", YouTube = true, Sites = ["example.org"] });
+        Assert.Empty(ConfigValidator.Validate(c));
+        Assert.Equal("Only YouTube and 1 site", LimitPlan.Describe(c.Limits[0]));
+
+        var rules = ConfigRenderer.Nftables(c);
+        Assert.Contains("set only_18fe343de7e6 { type ipv4_addr; size 65535; }", rules);
+        Assert.Contains("ether saddr 18:fe:34:3d:e7:e6 ip daddr != @only_18fe343de7e6 counter reject", rules);
+        // Ahead of "established", so setting the limit also ends what the device already had open.
+        Assert.True(rules.IndexOf("!= @only_18fe343de7e6", StringComparison.Ordinal) < rules.LastIndexOf("ct state established", StringComparison.Ordinal));
+        // Its lookups must come to the firewall, or the list would never be filled.
+        Assert.Contains("redirect to :53", rules);
+
+        var dns = ConfigRenderer.Dnsmasq(c);
+        Assert.Contains("nftset=/googlevideo.com/4#inet#palisade#only_18fe343de7e6\n", dns);
+        Assert.Contains("nftset=/example.org/4#inet#palisade#only_18fe343de7e6\n", dns);
+
+        c.Limits.Add(new() { Mac = "aa:bb:cc:dd:ee:ff", Name = "Kids tablet", YouTube = true });
+        Assert.Contains("nftset=/youtube.com/4#inet#palisade#only_18fe343de7e6,4#inet#palisade#only_aabbccddeeff\n", ConfigRenderer.Dnsmasq(c));
+
+        c.Limits.Add(new() { Mac = "aa:bb:cc:dd:ee:01", Name = "Empty" });
+        Assert.NotEmpty(ConfigValidator.Validate(c));
+        Assert.DoesNotContain("only_", ConfigRenderer.Nftables(Sample()));
+    }
+
+    [Fact]
+    public void Allowed_addresses_are_put_back_after_a_reload()
+    {
+        const string json = """{"nftables":[{"set":{"name":"only_18fe343de7e6","elem":["142.251.47.1",{"elem":{"val":"142.251.144.6","timeout":60}},"not-an-address"]}}]}""";
+        var held = LimitPlan.ParseAddresses(json);
+        Assert.Equal(["142.251.47.1", "142.251.144.6"], held);
+        Assert.Equal("add element inet palisade only_18fe343de7e6 { 142.251.47.1, 142.251.144.6 }\n",
+            LimitPlan.RestoreScript(new Dictionary<string, List<string>> { ["18:fe:34:3d:e7:e6"] = held, ["aa:bb:cc:dd:ee:ff"] = [] }));
+    }
+
+    [Fact]
     public void Wired_internet_port_asks_for_an_address()
     {
         Assert.Equal("allow-hotplug enp1s0\niface enp1s0 inet dhcp\n", ConfigRenderer.Render(Sample()).WanInterface.Split('\n', 2)[1]);

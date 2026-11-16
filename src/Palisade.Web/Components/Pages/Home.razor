@@ -354,6 +354,12 @@
     private IEnumerable<(string Text, string Href, string Link)> Attention()
     {
         if (State.Status is not { } s) yield break;
+        // A box that carries relay software keeps trying. One that stopped a day ago, or is already paused, needs no nagging.
+        foreach (var device in State.Devices().Where(d => d.Relay is { } r && DateTimeOffset.UtcNow - r.LastSeen < TimeSpan.FromDays(1)))
+        {
+            if (device.Access is { } access && AccessPlan.IsPausedByHand(access, DateTimeOffset.UtcNow)) continue;
+            yield return ($"{device.Name} keeps trying to reach a service that rents your internet connection out to strangers. Palisade refused it {Fmt.Plural((int)Math.Min(device.Relay!.Attempts, int.MaxValue), "time", "times")}, but a device like this often has other ways out.", "/devices", "Pause its internet on the Devices page");
+        }
         if (!s.FirewallActive) yield return ("The firewall rules are not loaded, so nothing is being filtered.", "/network", "Save your network settings again to reload them");
         if (!s.InternetReachable) yield return ("The firewall can't reach the internet. Check the cable on the internet port.", "/network", "See network settings");
         if (State.Wan is { IsUp: false }) yield return ($"No cable is detected on the internet port ({Config.WanInterface}).", "/network", "See network settings");

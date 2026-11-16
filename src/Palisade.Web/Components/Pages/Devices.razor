@@ -5,12 +5,20 @@
 <PageTitle>Devices · Palisade</PageTitle>
 
 <h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Devices</h1>
-<p class="mt-2 max-w-2xl text-lg text-muted">Everything that has joined your network. Pause a device's internet, give it off times such as bedtime, or fix its address so opened ports keep pointing at it.</p>
+<p class="mt-2 max-w-2xl text-lg text-muted">Everything that has joined your network. Choose a device, then use the buttons to pause it, limit it or fix its address.</p>
 
-<div class="mt-6 max-w-3xl space-y-4">
-    @if (_pauseFor is null && _scheduleFor is null && _renameFor is null) { <Problems Issues="Issues" /> }
+@{
+    var devices = State.Devices();
+    var now = DateTimeOffset.Now;
+    var shown = devices.Where(Matches).ToList();
+    var chosen = devices.FirstOrDefault(d => d.Mac == _selected);
+    var chosenPaused = chosen?.Access is { } chosenAccess && AccessPlan.IsPausedByHand(chosenAccess, now);
+    var none = chosen is null || _busy;
+}
 
-    @{ var devices = State.Devices(); var now = DateTimeOffset.Now; }
+<div class="mt-6 max-w-4xl">
+    @if (_pauseFor is null && _scheduleFor is null && _renameFor is null && _limitFor is null) { <div class="mb-4"><Problems Issues="Issues" /></div> }
+
     @if (devices.Count == 0)
     {
         <div class="panel p-6">
@@ -27,68 +35,148 @@
     }
     else
     {
-        <ul class="panel divide-y divide-line">
-            @foreach (var device in devices)
+        <div class="panel">
+            <div class="space-y-3 border-b border-line p-4">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="relative min-w-0 flex-1 basis-64">
+                        <label for="device-search" class="sr-only">Search devices</label>
+                        <Icon Name="search" Class="pointer-events-none absolute left-3 top-3 text-muted" />
+                        <input id="device-search" type="search" class="input pl-10" placeholder="Search by name, address or maker" autocomplete="off" spellcheck="false" @bind="_search" @bind:event="oninput" />
+                    </div>
+                    <p class="text-sm text-muted" role="status">@(shown.Count == devices.Count ? Fmt.Plural(devices.Count, "device", "devices") : $"{shown.Count} of {devices.Count} devices")</p>
+                </div>
+
+                <div role="toolbar" aria-label="Actions for the chosen device" class="flex flex-wrap gap-2">
+                    @if (chosenPaused)
+                    {
+                        <button type="button" class="btn btn-primary" disabled="@none" @onclick="() => ResumeAsync(chosen!)"><Icon Name="play" />Resume</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-danger" disabled="@none" @onclick="() => OpenPause(chosen!)"><Icon Name="pause" />Pause</button>
+                    }
+                    <button type="button" class="btn" disabled="@none" @onclick="() => OpenSchedule(chosen!)"><Icon Name="clock" />Off times</button>
+                    <button type="button" class="btn" disabled="@none" @onclick="() => OpenLimit(chosen!)"><Icon Name="filter" />Limit sites</button>
+                    <button type="button" class="btn" disabled="@none" @onclick="() => OpenRename(chosen!)"><Icon Name="edit" />Rename</button>
+                    @if (chosen?.Reservation is null)
+                    {
+                        <button type="button" class="btn" disabled="@(none || chosen!.Address.Length == 0)" @onclick="() => FixAsync(chosen!)"><Icon Name="pin" />Fix address</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn" disabled="@(none || chosen.BlockRule is not null)" title="@(chosen.BlockRule is not null ? "Remove the block rule first" : null)" @onclick="() => ReleaseAsync(chosen)"><Icon Name="pin" />Release address</button>
+                    }
+                    @if (chosen is { Address.Length: > 0 } && !_busy)
+                    {
+                        <a class="btn" href="/ports?device=@chosen.Address"><Icon Name="ports" />Open a port</a>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn" disabled><Icon Name="ports" />Open a port</button>
+                    }
+                    @if (chosen?.BlockRule is not null)
+                    {
+                        <button type="button" class="btn" disabled="@_busy" @onclick="() => UnblockAsync(chosen)"><Icon Name="unlock" />Remove block rule</button>
+                    }
+                </div>
+
+                <p class="text-sm text-muted" role="status">
+                    @if (chosen is null)
+                    {
+                        <span>Choose a device from the list to use the buttons.</span>
+                    }
+                    else
+                    {
+                        <span><strong class="text-ink">@chosen.Name</strong> · @(chosen.Address.Length > 0 ? $"{chosen.Address} · " : "")@chosen.Mac</span>
+                        @if (chosen.Maker.Length > 0) { <span> · made by @chosen.Maker</span> }
+                        else if (chosen.MadeUpAddress) { <span> · uses a private address, which hides who made it</span> }
+                        @if (chosen.Relay is { } caught) { <span> · tried a connection-sharing service @Fmt.Plural((int)Math.Min(caught.Attempts, int.MaxValue), "time", "times"), last on @caught.LastSeen.ToLocalTime().ToString("d MMM 'at' HH:mm", CultureInfo.InvariantCulture)</span> }
+                    }
+                </p>
+            </div>
+
+            @if (shown.Count == 0)
             {
-                var access = device.Access;
-                var pausedByHand = access is not null && AccessPlan.IsPausedByHand(access, now);
-                var offTime = access is null ? null : AccessPlan.CurrentOffTime(access, now.DateTime);
-                <li class="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
-                    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand" title="@(device.Type == DeviceType.Unknown ? "" : $"Looks like: {DeviceKind.Label(device.Type).ToLowerInvariant()}")">
-                        <Icon Name="@device.Type.ToString().ToLowerInvariant()" Class="h-6 w-6" />
-                    </span>
-                    <div class="min-w-0 flex-1 basis-56">
-                        <p class="truncate text-lg font-bold">@device.Name</p>
-                        <p class="text-sm text-muted">@(device.Address.Length > 0 ? $"{device.Address} · " : "")@device.Mac</p>
-                        @if (device.Maker.Length > 0) { <p class="text-sm text-muted">@(device.Type == DeviceType.Unknown ? "Made" : $"{DeviceKind.Label(device.Type)}, made") by @device.Maker</p> }
-                        else if (device.MadeUpAddress) { <p class="text-sm text-muted">Uses a private address, which hides who made it</p> }
-                        <p class="mt-1 flex flex-wrap gap-2">
-                            @if (pausedByHand) { <span class="tag bg-danger-soft text-danger">Internet paused@(access!.PausedUntil is { } until ? $" until {Clock(until)}" : "")</span> }
-                            else if (offTime is not null) { <span class="tag bg-danger-soft text-danger">Off time until @offTime.To</span> }
-                            @if (access is { OffTimes.Count: > 0 } && offTime is null) { <span class="tag bg-sunk text-ink">@Fmt.Plural(access.OffTimes.Count, "off time", "off times")</span> }
-                            @if (!device.Online) { <span class="tag bg-sunk text-muted">Not connected now</span> }
-                            @if (device.Reservation is not null) { <span class="tag bg-brand-soft text-ink">Fixed address</span> }
-                            @if (device.BlockRule is not null) { <span class="tag bg-danger-soft text-danger">Blocked by a rule</span> }
-                            @if (Config.Filter.Devices.FirstOrDefault(f => f.Mac == device.Mac) is { } own) { <a class="tag bg-sunk text-ink underline underline-offset-2" href="/filter">Own filter level: @Fmt.FilterLevel(own.Level)</a> }
-                        </p>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        @if (pausedByHand)
-                        {
-                            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="() => ResumeAsync(device)">Resume internet</button>
-                        }
-                        else
-                        {
-                            <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="() => OpenPause(device)">Pause internet</button>
-                        }
-                        <button type="button" class="btn" disabled="@_busy" @onclick="() => OpenSchedule(device)">Off times</button>
-                        <button type="button" class="btn" disabled="@_busy" aria-label="@($"Rename {device.Name}")" @onclick="() => OpenRename(device)">Rename</button>
-                        @if (device.BlockRule is not null)
-                        {
-                            <button type="button" class="btn" disabled="@_busy" @onclick="() => UnblockAsync(device)">Remove block rule</button>
-                        }
-                        @if (device.Address.Length > 0)
-                        {
-                            @if (device.Reservation is null)
-                            {
-                                <button type="button" class="btn" disabled="@_busy" @onclick="() => FixAsync(device)">Fix address</button>
-                            }
-                            else
-                            {
-                                <button type="button" class="btn" disabled="@(_busy || device.BlockRule is not null)" title="@(device.BlockRule is not null ? "Remove the block rule first" : null)" @onclick="() => ReleaseAsync(device)">Release address</button>
-                            }
-                            <a class="btn" href="/ports?device=@device.Address">Open a port</a>
-                        }
-                    </div>
-                </li>
+                <p class="p-6 text-muted">No device matches "@_search".</p>
             }
-        </ul>
-        <div class="max-w-2xl space-y-1 text-sm text-muted">
-            <p>A paused device loses the internet within seconds, even in the middle of a video. It can still reach other devices at home and this page.</p>
+            else
+            {
+                <ul class="max-h-[60dvh] divide-y divide-line overflow-y-auto" aria-label="Devices">
+                    @foreach (var device in shown)
+                    {
+                        var access = device.Access;
+                        var pausedByHand = access is not null && AccessPlan.IsPausedByHand(access, now);
+                        var offTime = access is null ? null : AccessPlan.CurrentOffTime(access, now.DateTime);
+                        var picked = device.Mac == _selected;
+                        var used = State.Usage?.Devices.FirstOrDefault(u => u.Address == device.Address && device.Address.Length > 0);
+                        <li>
+                            <button type="button" aria-pressed="@(picked ? "true" : "false")" @onclick="() => Choose(device)"
+                                    class="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left hover:bg-sunk @(picked ? "bg-brand-soft hover:bg-brand-soft" : "")">
+                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg @(picked ? "bg-brand text-on-brand" : "bg-sunk text-brand")">
+                                    <Icon Name="@device.Type.ToString().ToLowerInvariant()" Class="h-6 w-6" />
+                                </span>
+                                <span class="min-w-0 flex-1">
+                                    <span class="block truncate font-bold">@device.Name</span>
+                                    <span class="block truncate text-sm text-muted">@About(device)</span>
+                                    <span class="mt-1 flex flex-wrap gap-1 empty:hidden">
+                                        @if (pausedByHand) { <span class="tag bg-danger-soft text-danger">Paused@(access!.PausedUntil is { } until ? $" until {Clock(until)}" : "")</span> }
+                                        else if (offTime is not null) { <span class="tag bg-danger-soft text-danger">Off time until @offTime.To</span> }
+                                        @if (access is { OffTimes.Count: > 0 } && offTime is null) { <span class="tag bg-sunk text-ink">@Fmt.Plural(access.OffTimes.Count, "off time", "off times")</span> }
+                                        @if (device.BlockRule is not null) { <span class="tag bg-danger-soft text-danger">Blocked by a rule</span> }
+                                        @if (device.Limit is { } limit) { <span class="tag bg-brand-soft text-ink">@LimitPlan.Describe(limit)</span> }
+                                        @if (device.Relay is not null) { <span class="tag bg-warn-soft text-warn">Tried to share your connection</span> }
+                                        @if (device.Reservation is not null) { <span class="tag bg-sunk text-ink">Fixed address</span> }
+                                        @if (Config.Filter.Devices.FirstOrDefault(f => f.Mac == device.Mac) is { } own) { <span class="tag bg-sunk text-ink">Filter: @Fmt.FilterLevel(own.Level)</span> }
+                                    </span>
+                                </span>
+                                <span class="hidden w-32 shrink-0 text-sm sm:block @(device.Online ? "" : "text-muted")">@(device.Online ? device.Address : "Not connected")</span>
+                                <span class="w-24 shrink-0 whitespace-nowrap text-right text-sm">
+                                    @if (used is not null)
+                                    {
+                                        <span class="flex items-center justify-end gap-1"><Icon Name="down" Class="h-4 w-4 text-down" /><span class="sr-only">Received</span>@Fmt.Bytes(used.DownBytes)</span>
+                                        <span class="flex items-center justify-end gap-1"><Icon Name="up" Class="h-4 w-4 text-up" /><span class="sr-only">Sent</span>@Fmt.Bytes(used.UpBytes)</span>
+                                    }
+                                </span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+        <div class="mt-3 max-w-2xl space-y-1 text-sm text-muted">
+            <p>The amounts are what each device used over the last 24 hours. A paused device loses the internet within seconds, but still reaches other devices at home and this page.</p>
             <p>Devices are recognised by their hardware address. A phone set to change that address looks like a new device and is not paused.</p>
         </div>
     }
 </div>
+
+<Modal Open="_limitFor is not null" Title="@($"Limit {_limitFor?.Name} to chosen sites")" OnClose="() => _limitFor = null">
+    <form class="space-y-4" @onsubmit="SaveLimitAsync">
+        <p class="text-muted">This device will reach only what you choose here. Everything else it tries, in or out, is refused. Good for a TV box that is only for watching.</p>
+        <label class="panel flex cursor-pointer items-start gap-3 p-3 @(_limitYouTube ? "border-brand bg-brand-soft" : "")">
+            <input type="checkbox" class="mt-1 h-5 w-5 shrink-0 accent-brand" @bind="_limitYouTube" />
+            <span>
+                <span class="font-bold">YouTube</span>
+                <span class="block text-muted">With the Google services its apps need to start and sign in.</span>
+            </span>
+        </label>
+        <div>
+            <label for="limit-sites" class="field-label">Other sites to allow</label>
+            <textarea id="limit-sites" class="input min-h-24 py-2" rows="3" autocapitalize="none" spellcheck="false" placeholder="netflix.com" @bind="_limitSites"></textarea>
+            <p class="field-hint">One per line. A name covers everything under it. Big services often use several names, so an app may need a few added before it works.</p>
+        </div>
+        <p class="field-hint">Sites that share servers with an allowed one can also be reached; with YouTube that means Google's other sites. Open ports pointing at this device stop working.</p>
+        <Problems Issues="Issues" />
+        <div class="flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary" disabled="@_busy">Save limit</button>
+            @if (_limitFor?.Limit is not null)
+            {
+                <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="RemoveLimitAsync">Remove limit</button>
+            }
+            <button type="button" class="btn" @onclick="() => _limitFor = null">Cancel</button>
+        </div>
+    </form>
+</Modal>
 
 <Modal Open="_renameFor is not null" Title="@($"Rename {_renameFor?.Name}")" OnClose="() => _renameFor = null">
     <form class="space-y-4" @onsubmit="RenameAsync">
@@ -186,6 +274,30 @@
         [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
 
     private bool _busy;
+    private string _search = "";
+    private string? _selected;
+
+    private void Choose(Device device)
+    {
+        Issues = [];
+        _selected = _selected == device.Mac ? null : device.Mac;
+    }
+
+    /// <summary>One short line saying what the device is: its kind and maker when known, otherwise its hardware address.</summary>
+    private static string About(Device device) =>
+        device.Maker.Length > 0 ? (device.Type == DeviceType.Unknown ? device.Maker : $"{DeviceKind.Label(device.Type)} · {device.Maker}")
+        : device.Type != DeviceType.Unknown ? $"{DeviceKind.Label(device.Type)} · {device.Mac}"
+        : device.MadeUpAddress ? $"Private address · {device.Mac}"
+        : device.Mac;
+
+    private bool Matches(Device device)
+    {
+        var words = _search.Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return true;
+        var text = $"{device.Name} {device.OwnName} {device.Address} {device.Mac} {device.Maker} {DeviceKind.Label(device.Type)}";
+        return words.All(word => text.Contains(word, StringComparison.OrdinalIgnoreCase));
+    }
+
     private Device? _pauseFor, _scheduleFor, _renameFor;
     private string _newName = "";
 
@@ -221,11 +333,13 @@
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         try
         {
-            while (await timer.WaitForNextTickAsync(ct))
+            // Once straight away, so the amounts each device used are there when the page opens.
+            do
             {
                 await State.RefreshStatusAsync();
                 await InvokeAsync(StateHasChanged);
             }
+            while (await timer.WaitForNextTickAsync(ct));
         }
         catch (OperationCanceledException) { }
     }
@@ -267,6 +381,50 @@
         });
         _busy = false;
         return Issues.Count == 0;
+    }
+
+    private Device? _limitFor;
+    private bool _limitYouTube;
+    private string _limitSites = "";
+
+    private void OpenLimit(Device device)
+    {
+        Issues = [];
+        _limitYouTube = device.Limit?.YouTube ?? true;
+        _limitSites = string.Join('\n', device.Limit?.Sites ?? []);
+        _limitFor = device;
+    }
+
+    private async Task SaveLimitAsync()
+    {
+        if (_limitFor is not { } device) return;
+        var sites = new List<string>();
+        foreach (var line in _limitSites.Split(['\n', ',', ' '], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!SiteName.TryNormalize(line, out var site))
+            {
+                Issues = [new("", $"\"{line}\" is not a site name. Use a name like example.com.")];
+                return;
+            }
+            if (!sites.Contains(site)) sites.Add(site);
+        }
+        _busy = true;
+        var saved = await SaveAsync(c =>
+        {
+            c.Limits.RemoveAll(l => l.Mac == device.Mac);
+            c.Limits.Add(new DeviceLimit { Mac = device.Mac, Name = device.SafeName, YouTube = _limitYouTube, Sites = sites });
+        });
+        _busy = false;
+        if (saved) _limitFor = null;
+    }
+
+    private async Task RemoveLimitAsync()
+    {
+        if (_limitFor is not { } device) return;
+        _busy = true;
+        var saved = await SaveAsync(c => c.Limits.RemoveAll(l => l.Mac == device.Mac));
+        _busy = false;
+        if (saved) _limitFor = null;
     }
 
     private void OpenPause(Device device)

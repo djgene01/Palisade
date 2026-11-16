@@ -166,6 +166,8 @@ public sealed class SimulatedPlatform : ISystemPlatform
         return Task.FromResult(new SystemStatus
         {
             Hostname = "palisade-demo",
+            // The demo's unnamed device plays the part of a box that carries relay software.
+            RelayDevices = active.Filter.BlockRelays ? [new RelaySighting { Mac = "52:54:00:aa:00:04", Attempts = 212, LastSeen = now.AddMinutes(-3) }] : [],
             UptimeSeconds = (long)(now - _started).TotalSeconds,
             Simulated = true,
             FirewallActive = _applied is not null,
