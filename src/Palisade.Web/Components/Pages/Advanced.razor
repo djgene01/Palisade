@@ -6,6 +6,58 @@
 <h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Advanced</h1>
 <p class="mt-2 max-w-2xl text-lg text-muted">For the curious. These are the exact files Palisade writes from your settings. They are shown for checking, not for editing: the next save replaces them.</p>
 
+<section aria-labelledby="update-title" class="panel mt-8 max-w-2xl p-5">
+    <h2 id="update-title" class="text-xl font-bold">Palisade updates</h2>
+    @if (_update is null)
+    {
+        <p class="mt-2 text-muted" role="status">@(_updateError ?? "Looking up the installed version.")</p>
+    }
+    else
+    {
+        <p class="mt-2">
+            @if (_update.InstalledByHand) { <span>This copy was installed by hand, so it has no release number.</span> }
+            else { <span>Installed: <strong>@_update.Current</strong>.</span> }
+            @if (_update.Installing) { <strong> Installing @_update.Latest now. This page reconnects by itself in about a minute.</strong> }
+            else if (_update.Available) { <span> Release <strong>@_update.Latest</strong> is ready to install.</span> }
+            else if (_update.Latest.Length > 0) { <span> That is the newest release.</span> }
+        </p>
+        <p class="field-hint">@(_update.CheckedAt is { } at ? $"Last checked {at.ToLocalTime():d MMM, HH:mm}." : "Not checked yet.") New releases come from the Palisade repository on GitHub.</p>
+        @if (_update.Problem.Length > 0)
+        {
+            <p role="alert" class="mt-3 rounded-lg border border-warn bg-warn-soft p-3">@_update.Problem</p>
+        }
+
+        <div class="mt-4 flex items-start gap-4">
+            <Toggle Value="_update.Auto" ValueChanged="SetAutoAsync" Label="Install new releases automatically" Disabled="_updateBusy" />
+            <div>
+                <p class="font-bold">Install new releases automatically</p>
+                <p class="text-muted">Checked every night at about 3 o'clock. Installing restarts Palisade for a few seconds; your devices stay online. A copy installed by hand is never replaced automatically.</p>
+            </div>
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" class="btn" disabled="@_updateBusy" @onclick="() => CheckAsync(false)">@(_updateBusy ? "Working" : "Check now")</button>
+            @if (_update.Available && !_update.Installing)
+            {
+                <button type="button" class="btn btn-primary" disabled="@_updateBusy" @onclick="() => CheckAsync(true)">Install @_update.Latest</button>
+            }
+        </div>
+
+        <form class="mt-6 border-t border-line pt-4" @onsubmit="SaveTokenAsync">
+            <label for="update-key" class="field-label">Access key for a private repository</label>
+            <div class="flex flex-wrap gap-2">
+                <input id="update-key" class="input sm:max-w-xs" type="password" autocomplete="off" maxlength="255" placeholder="@(_update.HasToken ? "A key is stored" : "")" @bind="_token" />
+                <button type="submit" class="btn" disabled="@_updateBusy">Save key</button>
+                @if (_update.HasToken)
+                {
+                    <button type="button" class="btn btn-danger" disabled="@_updateBusy" @onclick="RemoveTokenAsync">Remove key</button>
+                }
+            </div>
+            <p class="field-hint">Only needed while the repository is private. On GitHub, make a fine-grained token for that one repository with read-only "Contents" access. The key is stored on the firewall and never shown again.</p>
+        </form>
+    }
+</section>
+
 @{ var files = Render(); }
 @if (files is null)
 {
@@ -36,6 +88,36 @@ else
 }
 
 @code {
+    [Inject] private IUpdates Updates { get; set; } = default!;
+
+    private UpdateStatus? _update;
+    private string? _updateError;
+    private string _token = "";
+    private bool _updateBusy;
+
+    protected override async Task OnInitializedAsync() => await UpdateAsync(() => Updates.GetUpdateAsync());
+
+    private async Task UpdateAsync(Func<Task<UpdateStatus>> call)
+    {
+        _updateBusy = true;
+        try { _update = await call(); }
+        catch (Exception ex) { _updateError = $"The firewall service did not answer about updates. ({ex.Message})"; }
+        _updateBusy = false;
+    }
+
+    private Task SetAutoAsync(bool auto) => UpdateAsync(() => Updates.SetUpdateAsync(new UpdateSettings { Auto = auto }));
+
+    private Task CheckAsync(bool install) => UpdateAsync(() => Updates.CheckUpdateAsync(install));
+
+    private async Task SaveTokenAsync()
+    {
+        if (_token.Trim().Length == 0 || _update is null) return;
+        await UpdateAsync(() => Updates.SetUpdateAsync(new UpdateSettings { Auto = _update.Auto, Token = _token.Trim() }));
+        _token = "";
+    }
+
+    private Task RemoveTokenAsync() => UpdateAsync(() => Updates.SetUpdateAsync(new UpdateSettings { Auto = _update?.Auto ?? false, Token = "" }));
+
     private GeneratedFiles? Render()
     {
         try { return ConfigRenderer.Render(Config); }

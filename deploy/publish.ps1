@@ -17,6 +17,10 @@ foreach ($name in 'install.sh', 'palisade-agent.service', 'palisade-web.service'
     [IO.File]::WriteAllText((Join-Path $out $name), $text, [Text.UTF8Encoding]::new($false))
 }
 
+# Marks this as a build copied on by hand. Releases built on GitHub carry their version tag here instead,
+# and only those are replaced by automatic updates.
+[IO.File]::WriteAllText((Join-Path $out 'VERSION'), "dev`n", [Text.UTF8Encoding]::new($false))
+
 Write-Host "Release is ready in $out"
 Write-Host 'Copy it over, for example:  scp -r release/palisade root@<firewall-address>:/root/'
 Write-Host 'Then on the firewall:        sh /root/palisade/install.sh'

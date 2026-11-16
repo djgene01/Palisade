@@ -16,6 +16,8 @@ public sealed record Device(string Name, string Address, string Mac, bool Online
     public bool MadeUpAddress { get; init; }
     /// <summary>True when neither the owner nor the device itself supplied a name.</summary>
     public bool Unnamed { get; init; }
+    /// <summary>A guess at what the device is, used only to choose its picture.</summary>
+    public DeviceType Type { get; init; }
 
     /// <summary>Device names go into config files, so reduce whatever the device called itself to letters, digits and dashes.</summary>
     public string SafeName
@@ -202,6 +204,7 @@ public sealed class FirewallState(IFirewallBackend backend, MakerLookup makers)
             return d with
             {
                 Access = Config.Access.FirstOrDefault(a => a.Mac == d.Mac), OwnName = own, Name = given ?? own, Renamed = given is not null,
+                Type = DeviceKind.Guess($"{given} {d.Name}", maker),
                 Maker = maker, MadeUpAddress = Core.Maker.IsMadeUp(d.Mac), Unnamed = unnamed,
             };
         })];

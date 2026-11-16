@@ -5,8 +5,27 @@ using Palisade.Core;
 namespace Palisade.Web.Services;
 
 /// <summary>Talks to the root agent over its Unix socket. This is the web UI's only route to the system.</summary>
-public sealed class AgentClient : IFirewallBackend, IDisposable
+public sealed class AgentClient : IFirewallBackend, IUpdates, IDisposable
 {
+    public async Task<UpdateStatus> GetUpdateAsync(CancellationToken ct = default) =>
+        (await _http.GetFromJsonAsync<UpdateStatus>("update", PalisadeJson.Options, ct))!;
+
+    public async Task<UpdateStatus> SetUpdateAsync(UpdateSettings settings, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("update/settings", settings, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<UpdateStatus>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<UpdateStatus> CheckUpdateAsync(bool install, CancellationToken ct = default)
+    {
+        // Downloading a release can take minutes on a slow line, far longer than any other call.
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var response = await _http.PostAsync(install ? "update/install" : "update/check", null, limit.Token);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<UpdateStatus>(PalisadeJson.Options, ct))!;
+    }
+
     private readonly HttpClient _http;
 
     public AgentClient(string socketPath)
@@ -187,5 +206,28 @@ public sealed class SimulatedPlatform : ISystemPlatform
             return new DhcpLease(expires, mac, reserved?.Address ?? new Ip4(start.Value + (uint)i).ToString(), name);
         }).ToList();
         return Task.FromResult<IReadOnlyList<DhcpLease>>(leases);
+    }
+}
+
+/// <summary>Stands in for the updater in the demo: it remembers the switch and pretends a newer release exists.</summary>
+public sealed class SimulatedUpdates : IUpdates
+{
+    private readonly UpdateStatus _status = new() { Current = "v1.0" };
+
+    public Task<UpdateStatus> GetUpdateAsync(CancellationToken ct = default) => Task.FromResult(_status);
+
+    public Task<UpdateStatus> SetUpdateAsync(UpdateSettings settings, CancellationToken ct = default)
+    {
+        _status.Auto = settings.Auto;
+        if (settings.Token is not null) _status.HasToken = settings.Token.Length > 0;
+        return Task.FromResult(_status);
+    }
+
+    public Task<UpdateStatus> CheckUpdateAsync(bool install, CancellationToken ct = default)
+    {
+        _status.CheckedAt = DateTimeOffset.UtcNow;
+        _status.Latest = "v1.1";
+        if (install) _status.Current = "v1.1";
+        return Task.FromResult(_status);
     }
 }

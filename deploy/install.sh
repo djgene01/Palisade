@@ -38,6 +38,8 @@ systemctl stop palisade-web palisade-agent 2>/dev/null || true
 mkdir -p /opt/palisade
 rm -rf /opt/palisade/agent /opt/palisade/web
 cp -r "$here/agent" "$here/web" /opt/palisade/
+# Records which release this is, so the firewall can tell when a newer one is published.
+if [ -f "$here/VERSION" ]; then cp "$here/VERSION" /opt/palisade/VERSION; else echo dev > /opt/palisade/VERSION; fi
 chown -R root:root /opt/palisade
 chmod 755 /opt/palisade/agent/Palisade.Agent /opt/palisade/web/Palisade.Web
 

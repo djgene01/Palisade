@@ -537,6 +537,33 @@ public class CoreTests
         Assert.Equal(60, Maker.Clean(new string('x', 200)).Length);
     }
 
+    [Theory]
+    [InlineData("", "Tuya Smart Inc.", DeviceType.SmartHome)]
+    [InlineData("", "Hangzhou Hikvision Digital Technology Co.,Ltd.", DeviceType.Camera)]
+    [InlineData("", "Nintendo Co.,Ltd", DeviceType.Console)]
+    [InlineData("", "Proxmox Server Solutions GmbH", DeviceType.Server)]
+    [InlineData("Eugene-Tablet", "Intel Corporate", DeviceType.Phone)]
+    [InlineData("Lounge TV", "", DeviceType.Tv)]
+    [InlineData("captain", "", DeviceType.Unknown)]
+    [InlineData("", "Apple, Inc.", DeviceType.Unknown)]
+    public void Device_kind_is_guessed_from_name_then_maker(string name, string maker, DeviceType expected) =>
+        Assert.Equal(expected, DeviceKind.Guess(name, maker));
+
+    [Fact]
+    public void Automatic_updates_never_replace_a_copy_installed_by_hand()
+    {
+        Assert.Equal("v1.2", UpdatePlan.InstalledVersion("v1.2\n"));
+        Assert.Equal("", UpdatePlan.InstalledVersion("dev\n"));
+        Assert.Equal("", UpdatePlan.InstalledVersion("v1; rm -rf /"));
+        Assert.True(UpdatePlan.ShouldAutoInstall(new UpdateStatus { Auto = true, Current = "v1.2", Latest = "v1.3" }));
+        Assert.False(UpdatePlan.ShouldAutoInstall(new UpdateStatus { Auto = true, Current = "v1.3", Latest = "v1.3" }));
+        Assert.False(UpdatePlan.ShouldAutoInstall(new UpdateStatus { Auto = false, Current = "v1.2", Latest = "v1.3" }));
+        Assert.False(UpdatePlan.ShouldAutoInstall(new UpdateStatus { Auto = true, Current = "", Latest = "v1.3" }));
+        Assert.False(UpdatePlan.IsToken("abc def"));
+        Assert.True(UpdatePlan.IsDigest("sha256:" + new string('a', 64)));
+        Assert.False(UpdatePlan.IsDigest("sha256:xyz"));
+    }
+
     [Fact]
     public void Wired_internet_port_asks_for_an_address()
     {

@@ -30,7 +30,11 @@ builder.Services.AddSingleton(sp =>
         TimeSpan.FromSeconds(PalisadeDefaults.ConfirmSeconds), message => logger.LogWarning("{Message}", message));
 });
 
+builder.Services.AddSingleton(sp => new Updater(dataDirectory,
+    builder.Configuration["Palisade:UpdateRepository"] ?? "djgene01/Palisade", sp.GetRequiredService<ILogger<Updater>>()));
+
 var app = builder.Build();
+var updater = app.Services.GetRequiredService<Updater>();
 var engine = app.Services.GetRequiredService<FirewallEngine>();
 await engine.InitializeAsync();
 
@@ -42,6 +46,10 @@ app.MapPost("/access", (List<DeviceAccess> access, CancellationToken ct) => engi
 app.MapGet("/wifi", (CancellationToken ct) => engine.GetWifiAsync(ct));
 app.MapPost("/wifi", (WifiRequest request, CancellationToken ct) => engine.SetWifiAsync(request, ct));
 app.MapPost("/names", (List<DeviceName> names, CancellationToken ct) => engine.SetNamesAsync(names, ct));
+app.MapGet("/update", (CancellationToken ct) => updater.GetUpdateAsync(ct));
+app.MapPost("/update/settings", (UpdateSettings settings, CancellationToken ct) => updater.SetUpdateAsync(settings, ct));
+app.MapPost("/update/check", (CancellationToken ct) => updater.CheckUpdateAsync(install: false, ct));
+app.MapPost("/update/install", (CancellationToken ct) => updater.CheckUpdateAsync(install: true, ct));
 app.MapPost("/config/apply", (FirewallConfig config, CancellationToken ct) => engine.ApplyAsync(config, ct));
 app.MapPost("/config/confirm", async (CancellationToken ct) => { await engine.ConfirmAsync(ct); return Results.NoContent(); });
 app.MapPost("/config/revert", async (CancellationToken ct) => { await engine.RevertAsync(ct); return Results.NoContent(); });
@@ -59,6 +67,7 @@ if (app.Services.GetRequiredService<ISystemPlatform>() is LinuxPlatform linux)
 {
     _ = linux.WatchUsageAsync(app.Lifetime.ApplicationStopping);
     _ = linux.WatchClockAsync(app.Lifetime.ApplicationStopping);
+    _ = updater.WatchAsync(app.Lifetime.ApplicationStopping);
 }
 
 app.Run();

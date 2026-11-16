@@ -46,11 +46,13 @@ if (backendKind == "simulated")
 {
     builder.Services.AddSingleton<IFirewallBackend>(_ =>
         new FirewallEngine(new SimulatedPlatform(), Path.Combine(dataDirectory, "simulated"), TimeSpan.FromSeconds(PalisadeDefaults.ConfirmSeconds)));
+    builder.Services.AddSingleton<IUpdates>(new SimulatedUpdates());
 }
 else
 {
     builder.Services.AddSingleton<IFirewallBackend>(_ =>
         new AgentClient(builder.Configuration["Palisade:Socket"] ?? "/run/palisade/agent.sock"));
+    builder.Services.AddSingleton(sp => (IUpdates)sp.GetRequiredService<IFirewallBackend>());
 }
 
 var app = builder.Build();

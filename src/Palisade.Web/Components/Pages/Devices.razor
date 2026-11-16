@@ -34,10 +34,13 @@
                 var pausedByHand = access is not null && AccessPlan.IsPausedByHand(access, now);
                 var offTime = access is null ? null : AccessPlan.CurrentOffTime(access, now.DateTime);
                 <li class="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
+                    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand" title="@(device.Type == DeviceType.Unknown ? "" : $"Looks like: {DeviceKind.Label(device.Type).ToLowerInvariant()}")">
+                        <Icon Name="@device.Type.ToString().ToLowerInvariant()" Class="h-6 w-6" />
+                    </span>
                     <div class="min-w-0 flex-1 basis-56">
                         <p class="truncate text-lg font-bold">@device.Name</p>
                         <p class="text-sm text-muted">@(device.Address.Length > 0 ? $"{device.Address} · " : "")@device.Mac</p>
-                        @if (device.Maker.Length > 0) { <p class="text-sm text-muted">Made by @device.Maker</p> }
+                        @if (device.Maker.Length > 0) { <p class="text-sm text-muted">@(device.Type == DeviceType.Unknown ? "Made" : $"{DeviceKind.Label(device.Type)}, made") by @device.Maker</p> }
                         else if (device.MadeUpAddress) { <p class="text-sm text-muted">Uses a private address, which hides who made it</p> }
                         <p class="mt-1 flex flex-wrap gap-2">
                             @if (pausedByHand) { <span class="tag bg-danger-soft text-danger">Internet paused@(access!.PausedUntil is { } until ? $" until {Clock(until)}" : "")</span> }
