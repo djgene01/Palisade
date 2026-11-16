@@ -7,8 +7,66 @@ namespace Palisade.Agent;
 
 /// <summary>Applies generated files to a Debian system. Runs as root; nothing else in the product does.</summary>
 [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform
+public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch
 {
+    private readonly SemaphoreSlim _watchGate = new(1, 1);
+
+    public async Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default)
+    {
+        var seconds = WatchPlan.Seconds(request.Seconds);
+        var report = new WatchReport { Address = request.Address, Seconds = seconds };
+        if (!Ip4.TryParse(request.Address, out var ip) || ip.ToString() != request.Address)
+        {
+            report.Problem = "That is not a device address.";
+            return report;
+        }
+        // One watch at a time: they share one counting table.
+        if (!await _watchGate.WaitAsync(0, ct))
+        {
+            report.Problem = "Another device is being watched right now. Try again in a moment.";
+            return report;
+        }
+        try
+        {
+            var script = Path.Combine(dataDirectory, "watch.nft");
+            await File.WriteAllTextAsync(script, WatchPlan.Script(request.Address), ct);
+            var started = await RunAsync("nft", ["-f", script], ct);
+            if (started.ExitCode != 0)
+            {
+                report.Problem = $"The firewall could not start counting. ({started.Error.Trim()})";
+                return report;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
+            var sent = await RunAsync("nft", ["-j", "list", "set", "inet", WatchPlan.Table, WatchPlan.UpSet], ct);
+            var received = await RunAsync("nft", ["-j", "list", "set", "inet", WatchPlan.Table, WatchPlan.DownSet], ct);
+            if (sent.ExitCode != 0 || received.ExitCode != 0)
+            {
+                // Saving a setting reloads every rule, which also clears this table.
+                report.Problem = "The count was interrupted, most likely by a setting being saved. Try again.";
+                return report;
+            }
+            var flows = WatchPlan.Merge(WatchPlan.ParseFlows(sent.Output), WatchPlan.ParseFlows(received.Output));
+            report.Flows = [.. await Task.WhenAll(flows.Take(40).Select(async f => f with { Name = await NameOfAsync(f.Address) }))];
+            return report;
+        }
+        finally
+        {
+            await RunAsync("nft", ["delete", "table", "inet", WatchPlan.Table], CancellationToken.None);
+            _watchGate.Release();
+        }
+    }
+
+    /// <summary>Asks the internet what an address calls itself. Many have no name, and a slow answer is not worth waiting for.</summary>
+    private static async Task<string> NameOfAsync(string address)
+    {
+        try
+        {
+            var name = (await System.Net.Dns.GetHostEntryAsync(address).WaitAsync(TimeSpan.FromSeconds(3))).HostName.TrimEnd('.').ToLowerInvariant();
+            return SiteName.IsValid(name) ? name : "";
+        }
+        catch (Exception) { return ""; }
+    }
+
     private const string NftablesConf = "/etc/nftables.conf";
     private const string DnsmasqConf = "/etc/dnsmasq.d/palisade.conf";
     private const string LanInterfaceConf = "/etc/network/interfaces.d/palisade-lan";

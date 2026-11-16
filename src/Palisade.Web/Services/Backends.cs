@@ -5,8 +5,15 @@ using Palisade.Core;
 namespace Palisade.Web.Services;
 
 /// <summary>Talks to the root agent over its Unix socket. This is the web UI's only route to the system.</summary>
-public sealed class AgentClient : IFirewallBackend, IUpdates, IDisposable
+public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDisposable
 {
+    public async Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("watch", request, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<WatchReport>(PalisadeJson.Options, ct))!;
+    }
+
     public async Task<UpdateStatus> GetUpdateAsync(CancellationToken ct = default) =>
         (await _http.GetFromJsonAsync<UpdateStatus>("update", PalisadeJson.Options, ct))!;
 
@@ -229,5 +236,24 @@ public sealed class SimulatedUpdates : IUpdates
         _status.Latest = "v1.1";
         if (install) _status.Current = "v1.1";
         return Task.FromResult(_status);
+    }
+}
+
+/// <summary>Stands in for a real watch in the demo, with a made-up list after a short wait.</summary>
+public sealed class SimulatedWatch : ITrafficWatch
+{
+    public async Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3), ct);
+        return new WatchReport
+        {
+            Address = request.Address, Seconds = WatchPlan.Seconds(request.Seconds),
+            Flows =
+            [
+                new("203.0.113.40", "tcp", 443, 48_200, 9_340_000) { Name = "upload.example-cloud.com" },
+                new("198.51.100.7", "tcp", 8883, 12_400, 61_000),
+                new("192.0.2.53", "udp", 123, 180, 180) { Name = "time.example.net" },
+            ],
+        };
     }
 }

@@ -565,6 +565,26 @@ public class CoreTests
     }
 
     [Fact]
+    public void Watching_a_device_counts_by_far_address_and_port()
+    {
+        var script = WatchPlan.Script("192.168.50.144");
+        Assert.Contains("ip saddr 192.168.50.144 meta l4proto { tcp, udp } update @sent { ip daddr . meta l4proto . th dport }", script);
+        Assert.Contains("policy accept;", script);
+        Assert.DoesNotContain("drop", script);
+        Assert.Throws<InvalidOperationException>(() => WatchPlan.Script("1.2.3.4; flush ruleset"));
+
+        const string up = """{"nftables":[{"metainfo":{}},{"set":{"name":"sent","elem":[{"elem":{"val":{"concat":["203.0.113.40","tcp",443]},"counter":{"packets":9,"bytes":9000}}},{"elem":{"val":{"concat":["198.51.100.7",17,123]},"counter":{"packets":1,"bytes":76}}}]}}]}""";
+        const string down = """{"nftables":[{"set":{"name":"received","elem":[{"elem":{"val":{"concat":["203.0.113.40","tcp",443]},"counter":{"packets":4,"bytes":400}}}]}}]}""";
+        var flows = WatchPlan.Merge(WatchPlan.ParseFlows(up), WatchPlan.ParseFlows(down));
+        Assert.Equal(2, flows.Count);
+        Assert.Equal(new WatchFlow("203.0.113.40", "tcp", 443, 400, 9000), flows[0]);
+        Assert.Equal(new WatchFlow("198.51.100.7", "udp", 123, 0, 76), flows[1]);
+        Assert.Empty(WatchPlan.ParseFlows("not json"));
+        Assert.Equal("Secure web (HTTPS)", WatchPlan.PortName("tcp", 443));
+        Assert.Equal("TCP port 9999", WatchPlan.PortName("tcp", 9999));
+    }
+
+    [Fact]
     public void Wired_internet_port_asks_for_an_address()
     {
         Assert.Equal("allow-hotplug enp1s0\niface enp1s0 inet dhcp\n", ConfigRenderer.Render(Sample()).WanInterface.Split('\n', 2)[1]);

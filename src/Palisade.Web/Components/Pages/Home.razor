@@ -193,7 +193,7 @@
                 var device = devices.FirstOrDefault(d => d.Address == u.Address);
                 var down = Measure(u, down: true);
                 var up = Measure(u, down: false);
-                <li class="grid items-center gap-x-5 gap-y-2 py-3 sm:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_auto]">
+                <li class="grid items-center gap-x-5 gap-y-2 py-3 sm:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_auto_auto]">
                     <div class="flex min-w-0 items-center gap-3">
                         <Icon Name="@((device?.Type ?? DeviceType.Unknown).ToString().ToLowerInvariant())" Class="h-7 w-7 text-brand" />
                         <div class="min-w-0">
@@ -209,6 +209,7 @@
                         <span class="block"><span class="font-bold">@Show(down)</span> <span class="mx-1 inline-block h-2 w-2 rounded-full bg-down" aria-hidden="true"></span><span class="text-muted">coming in</span></span>
                         <span class="block"><span class="font-bold">@Show(up)</span> <span class="mx-1 inline-block h-2 w-2 rounded-full bg-up" aria-hidden="true"></span><span class="text-muted">going out</span></span>
                     </p>
+                    <button type="button" class="btn" aria-label="@($"See where {device?.Name ?? u.Address} connects to")" @onclick="() => StartWatchAsync(u.Address, device?.Name ?? u.Address)">Where to?</button>
                 </li>
             }
         </ol>
@@ -220,7 +221,66 @@
     <p class="mt-3 text-sm text-muted">Counts traffic between your devices and the internet. Totals start again from zero if the firewall restarts.</p>
 </section>
 
+<Modal Open="_watchFor is not null" Title="@($"Where {_watchName} connects to")" OnClose="CloseWatch">
+    @if (_watching)
+    {
+        <p role="status">Counting what this device sends and receives for @WatchPlan.DefaultSeconds seconds. Keep this open.</p>
+        <p class="field-hint">Only addresses, ports and sizes are counted. Nothing the device says is read or kept.</p>
+    }
+    else if (_watch is { Problem.Length: > 0 })
+    {
+        <p role="alert" class="rounded-lg border border-warn bg-warn-soft p-3">@_watch.Problem</p>
+    }
+    else if (_watch is not null)
+    {
+        @if (_watch.Flows.Count == 0)
+        {
+            <p>This device sent and received nothing through the firewall in those @_watch.Seconds seconds.</p>
+        }
+        else
+        {
+            <p class="text-muted">In @_watch.Seconds seconds, biggest first.</p>
+            <ul class="mt-3 divide-y divide-line">
+                @foreach (var flow in _watch.Flows.Take(15))
+                {
+                    <li class="py-3">
+                        <p class="break-all font-bold">@(flow.Name.Length > 0 ? flow.Name : flow.Address)</p>
+                        <p class="text-sm text-muted">@(flow.Name.Length > 0 ? $"{flow.Address} · " : "")@WatchPlan.PortName(flow.Protocol, flow.Port)</p>
+                        <p class="mt-1 text-sm">
+                            <span class="mr-4 whitespace-nowrap"><span class="mr-1 inline-block h-2 w-2 rounded-full bg-up" aria-hidden="true"></span><strong>@Fmt.Bytes(flow.UpBytes)</strong> sent to it</span>
+                            <span class="whitespace-nowrap"><span class="mr-1 inline-block h-2 w-2 rounded-full bg-down" aria-hidden="true"></span><strong>@Fmt.Bytes(flow.DownBytes)</strong> received from it</span>
+                        </p>
+                    </li>
+                }
+            </ul>
+            @if (_watch.Flows.Count > 15)
+            {
+                <p class="mt-2 text-sm text-muted">And @Fmt.Plural(_watch.Flows.Count - 15, "smaller connection", "smaller connections").</p>
+            }
+        }
+        <button type="button" class="btn mt-4" @onclick="() => StartWatchAsync(_watchFor!, _watchName)">Count again</button>
+    }
+</Modal>
+
 @code {
+    [Inject] private ITrafficWatch Watcher { get; set; } = default!;
+
+    private string? _watchFor;
+    private string _watchName = "";
+    private bool _watching;
+    private WatchReport? _watch;
+
+    private async Task StartWatchAsync(string address, string name)
+    {
+        if (_watching) return;
+        (_watchFor, _watchName, _watching, _watch) = (address, name, true, null);
+        try { _watch = await Watcher.WatchAsync(new WatchRequest { Address = address }); }
+        catch (Exception ex) { _watch = new WatchReport { Problem = $"The firewall did not answer. ({ex.Message})" }; }
+        _watching = false;
+    }
+
+    private void CloseWatch() => _watchFor = null;
+
     private bool _byRate;
 
     private double Measure(DeviceUsage u, bool down) => _byRate ? (down ? u.DownRate : u.UpRate) : (down ? u.DownBytes : u.UpBytes);

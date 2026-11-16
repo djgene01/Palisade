@@ -46,6 +46,10 @@ app.MapPost("/access", (List<DeviceAccess> access, CancellationToken ct) => engi
 app.MapGet("/wifi", (CancellationToken ct) => engine.GetWifiAsync(ct));
 app.MapPost("/wifi", (WifiRequest request, CancellationToken ct) => engine.SetWifiAsync(request, ct));
 app.MapPost("/names", (List<DeviceName> names, CancellationToken ct) => engine.SetNamesAsync(names, ct));
+app.MapPost("/watch", (WatchRequest request, CancellationToken ct) =>
+    app.Services.GetRequiredService<ISystemPlatform>() is ITrafficWatch watch
+        ? watch.WatchAsync(request, ct)
+        : Task.FromResult(new WatchReport { Problem = "Watching a device is not available on this system." }));
 app.MapGet("/update", (CancellationToken ct) => updater.GetUpdateAsync(ct));
 app.MapPost("/update/settings", (UpdateSettings settings, CancellationToken ct) => updater.SetUpdateAsync(settings, ct));
 app.MapPost("/update/check", (CancellationToken ct) => updater.CheckUpdateAsync(install: false, ct));
