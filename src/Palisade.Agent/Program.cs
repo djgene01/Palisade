@@ -72,6 +72,8 @@ if (app.Services.GetRequiredService<ISystemPlatform>() is LinuxPlatform linux)
     _ = linux.WatchUsageAsync(app.Lifetime.ApplicationStopping);
     _ = linux.WatchClockAsync(app.Lifetime.ApplicationStopping);
     _ = updater.WatchAsync(app.Lifetime.ApplicationStopping);
+    // A restart or upgrade should not cost the last few minutes of the week's totals.
+    app.Lifetime.ApplicationStopping.Register(() => linux.SaveTotalsAsync(CancellationToken.None).Wait(TimeSpan.FromSeconds(3)));
 }
 
 app.Run();

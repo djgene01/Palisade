@@ -8,7 +8,15 @@ public sealed class UsageReport
     /// <summary>When the totals start: 24 hours ago, or when counting began if that is more recent.</summary>
     public DateTimeOffset Since { get; set; }
     public List<DeviceUsage> Devices { get; set; } = [];
+    /// <summary>Everything all devices used together over longer stretches, such as the last 3 and 7 days.</summary>
+    public List<PeriodTotal> Periods { get; set; } = [];
 }
+
+/// <summary>The whole network's internet use over a number of days. Since is later than the period's start when counting began more recently.</summary>
+public sealed record PeriodTotal(int Days, long DownBytes, long UpBytes, DateTimeOffset Since);
+
+/// <summary>One hour of the whole network's use, as saved to disk so the totals survive a restart.</summary>
+public sealed record HourTotal(long Hour, long Down, long Up);
 
 /// <summary>
 /// Turns the kernel's ever-growing per-address byte counters into "how much in the last 24 hours" and
@@ -25,6 +33,22 @@ public sealed class UsageTracker(DateTimeOffset startedAt)
     }
 
     private const int HoursKept = 24;
+    public static readonly int[] PeriodDays = [3, 7];
+    private const int TotalHoursKept = 24 * 7;
+    // The whole network per hour, kept for a week. Unlike the per-device hours these are saved and loaded.
+    private readonly SortedDictionary<long, (long Down, long Up)> _totals = [];
+
+    public List<HourTotal> ExportTotals() => [.. _totals.Select(t => new HourTotal(t.Key, t.Value.Down, t.Value.Up))];
+
+    public void ImportTotals(IEnumerable<HourTotal>? saved)
+    {
+        foreach (var hour in saved ?? [])
+        {
+            if (hour.Down < 0 || hour.Up < 0) continue;
+            var held = _totals.GetValueOrDefault(hour.Hour);
+            _totals[hour.Hour] = (held.Down + hour.Down, held.Up + hour.Up);
+        }
+    }
     private readonly Dictionary<string, Entry> _entries = [];
     private DateTimeOffset? _lastAt;
 
@@ -53,7 +77,10 @@ public sealed class UsageTracker(DateTimeOffset startedAt)
             if (down == 0 && up == 0) continue;
             var bucket = entry.Hours.GetValueOrDefault(hour);
             entry.Hours[hour] = (bucket.Down + down, bucket.Up + up);
+            var total = _totals.GetValueOrDefault(hour);
+            _totals[hour] = (total.Down + down, total.Up + up);
         }
+        foreach (var old in _totals.Keys.Where(h => h <= hour - TotalHoursKept).ToList()) _totals.Remove(old);
 
         foreach (var (address, entry) in _entries.ToList())
         {
@@ -74,8 +101,20 @@ public sealed class UsageTracker(DateTimeOffset startedAt)
     public UsageReport Report(DateTimeOffset now)
     {
         var windowStart = now.AddHours(-HoursKept);
+        var thisHour = now.ToUnixTimeSeconds() / 3600;
+        var counting = _totals.Count > 0 ? DateTimeOffset.FromUnixTimeSeconds(_totals.Keys.First() * 3600) : startedAt;
+        if (counting > startedAt) counting = startedAt;
         return new UsageReport
         {
+            Periods =
+            [
+                .. PeriodDays.Select(days =>
+                {
+                    var hours = _totals.Where(t => t.Key > thisHour - days * 24).Select(t => t.Value).ToList();
+                    var from = now.AddDays(-days);
+                    return new PeriodTotal(days, hours.Sum(h => h.Down), hours.Sum(h => h.Up), counting > from ? counting : from);
+                }),
+            ],
             Since = startedAt > windowStart ? startedAt : windowStart,
             Devices =
             [

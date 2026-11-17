@@ -668,6 +668,37 @@ public class CoreTests
     }
 
     [Fact]
+    public void Network_totals_cover_three_and_seven_days_and_survive_a_restart()
+    {
+        var start = new DateTimeOffset(2026, 11, 10, 8, 0, 0, TimeSpan.Zero);
+        var tracker = new UsageTracker(start);
+        tracker.Record(start, new Dictionary<string, (long, long)> { ["192.168.50.20"] = (0, 0) });
+        tracker.Record(start.AddMinutes(1), new Dictionary<string, (long, long)> { ["192.168.50.20"] = (1000, 100) });
+        // Five days later a second device adds to the total.
+        var later = start.AddDays(5);
+        tracker.Record(later, new Dictionary<string, (long, long)> { ["192.168.50.20"] = (1000, 100), ["192.168.50.21"] = (500, 50) });
+
+        var periods = tracker.Report(later.AddMinutes(1)).Periods;
+        Assert.Equal([3, 7], periods.Select(p => p.Days));
+        Assert.Equal((500, 50), (periods[0].DownBytes, periods[0].UpBytes));
+        Assert.Equal((1500, 150), (periods[1].DownBytes, periods[1].UpBytes));
+        // Counting began five days ago, so the 7-day figure says so and the 3-day one is complete.
+        Assert.Equal(start, periods[1].Since);
+        Assert.Equal(later.AddMinutes(1).AddDays(-3), periods[0].Since);
+
+        var restarted = new UsageTracker(later.AddMinutes(2));
+        restarted.ImportTotals(tracker.ExportTotals());
+        var after = restarted.Report(later.AddMinutes(3)).Periods;
+        Assert.Equal(1500, after[1].DownBytes);
+        Assert.Equal(start, after[1].Since);
+
+        // Hours older than a week drop out.
+        restarted.Record(later.AddDays(8), new Dictionary<string, (long, long)> { ["192.168.50.20"] = (0, 0) });
+        restarted.Record(later.AddDays(8).AddMinutes(1), new Dictionary<string, (long, long)> { ["192.168.50.20"] = (10, 1) });
+        Assert.Equal(10, restarted.Report(later.AddDays(8).AddMinutes(2)).Periods[1].DownBytes);
+    }
+
+    [Fact]
     public void Wired_internet_port_asks_for_an_address()
     {
         Assert.Equal("allow-hotplug enp1s0\niface enp1s0 inet dhcp\n", ConfigRenderer.Render(Sample()).WanInterface.Split('\n', 2)[1]);

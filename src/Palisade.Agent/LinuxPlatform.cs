@@ -323,14 +323,52 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
         try
         {
+            await LoadTotalsAsync(ct);
+            var ticks = 0;
             do
             {
                 await GetUsageAsync(ct);
                 await NoteRelaysAsync(ct);
+                // Every five minutes: often enough that a power cut loses little, rare enough to spare the disk.
+                if (++ticks % 20 == 0) await SaveTotalsAsync(ct);
             }
             while (await timer.WaitForNextTickAsync(ct));
         }
         catch (OperationCanceledException) { }
+    }
+
+    private string TotalsFile => Path.Combine(dataDirectory, "usage-totals.json");
+
+    private async Task LoadTotalsAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!File.Exists(TotalsFile)) return;
+            var saved = System.Text.Json.JsonSerializer.Deserialize<List<HourTotal>>(await File.ReadAllTextAsync(TotalsFile, ct), PalisadeJson.Options);
+            await _usageGate.WaitAsync(ct);
+            try { _usage.ImportTotals(saved); }
+            finally { _usageGate.Release(); }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Saved traffic totals could not be read, so counting starts afresh: {Message}", ex.Message);
+        }
+    }
+
+    public async Task SaveTotalsAsync(CancellationToken ct)
+    {
+        try
+        {
+            List<HourTotal> totals;
+            await _usageGate.WaitAsync(ct);
+            try { totals = _usage.ExportTotals(); }
+            finally { _usageGate.Release(); }
+            await WriteAtomicAsync(TotalsFile, System.Text.Json.JsonSerializer.Serialize(totals, PalisadeJson.Options), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Traffic totals could not be saved: {Message}", ex.Message);
+        }
     }
 
     public async Task<UsageReport> GetUsageAsync(CancellationToken ct)

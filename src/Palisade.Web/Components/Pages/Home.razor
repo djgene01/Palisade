@@ -98,6 +98,30 @@
     </div>
 </section>
 
+@if (State.Usage is { Periods.Count: > 0 } totals)
+{
+    <section aria-labelledby="totals-title" class="panel mt-4 p-5">
+        <h2 id="totals-title" class="flex items-center gap-3 text-xl font-bold"><Icon Name="chart" Class="h-6 w-6 text-brand" />Total internet use</h2>
+        <dl class="mt-3 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+            @foreach (var period in totals.Periods)
+            {
+                var partial = DateTimeOffset.UtcNow - period.Since < TimeSpan.FromDays(period.Days) - TimeSpan.FromHours(1);
+                <div>
+                    <dt class="font-semibold text-muted">Last @period.Days days</dt>
+                    <dd class="mt-1 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                        <span class="flex items-center gap-2 whitespace-nowrap"><Icon Name="down" Class="text-down" /><span class="text-2xl font-bold">@Fmt.Bytes(period.DownBytes)</span><span class="text-sm text-muted">in</span></span>
+                        <span class="flex items-center gap-2 whitespace-nowrap"><Icon Name="up" Class="text-up" /><span class="text-2xl font-bold">@Fmt.Bytes(period.UpBytes)</span><span class="text-sm text-muted">out</span></span>
+                    </dd>
+                    @if (partial)
+                    {
+                        <dd class="mt-1 text-sm text-muted">So far: counting began on @period.Since.ToLocalTime().ToString("d MMM 'at' HH:mm", CultureInfo.InvariantCulture).</dd>
+                    }
+                </div>
+            }
+        </dl>
+    </section>
+}
+
 <div class="mt-4 grid gap-4 lg:grid-cols-[3fr_2fr]">
     <section aria-labelledby="traffic-title" class="panel min-w-0 p-5">
         <div class="flex flex-wrap items-center justify-between gap-2">
