@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:Palisade.App"
+             xmlns:components="clr-namespace:Palisade.App.Components"
+             x:Class="Palisade.App.MainPage"
+             SafeAreaEdges="Container"
+             BackgroundColor="{AppThemeBinding Light=#f2f5fb, Dark=#0e1a33}">
+
+    <!-- Container: the page stays clear of the status bar and the gesture bar, which Android 15 and later
+         otherwise draw over the content. The colour shows behind those bars, so it follows the phone's
+         light or dark setting, as their icons do. -->
+
+    <BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
+        <BlazorWebView.RootComponents>
+            <RootComponent Selector="#app" ComponentType="{x:Type components:Routes}" />
+        </BlazorWebView.RootComponents>
+    </BlazorWebView>
+
+</ContentPage>
