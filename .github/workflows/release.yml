@@ -23,7 +23,10 @@ jobs:
 
       # Only the firewall's own projects: the solution also holds the companion app, which needs the MAUI workload.
       - name: Test
-        run: dotnet test tests/Palisade.Core.Tests --nologo
+        run: |
+          set -eu
+          dotnet test tests/Palisade.Core.Tests --nologo
+          dotnet test tests/Palisade.Web.Tests --nologo
 
       - name: Build the package
         run: |

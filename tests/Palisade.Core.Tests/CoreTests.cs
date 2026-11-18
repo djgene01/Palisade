@@ -36,7 +36,7 @@ public class CoreTests
         Assert.Contains("flush ruleset", text);
         Assert.Contains("type filter hook input priority filter; policy drop;", text);
         Assert.Contains("iifname \"enp2s0\" udp dport { 53, 67 } accept", text);
-        Assert.Contains("iifname \"enp2s0\" tcp dport { 22, 8080, 8081 } accept", text);
+        Assert.Contains("iifname \"enp2s0\" tcp dport { 22, 8080, 8081, 8443 } accept", text);
         Assert.DoesNotContain("manage from internet side", text);
         Assert.Contains("iifname \"enp2s0\" oifname \"enp1s0\" ip saddr 192.168.50.30 counter reject with icmpx type admin-prohibited comment \"Block tablet\"", text);
         Assert.Contains("iifname \"enp2s0\" oifname \"enp1s0\" tcp dport { 23, 2323 } counter reject", text);
@@ -59,8 +59,24 @@ public class CoreTests
         c.PortForwards.Clear();
         var text = ConfigRenderer.Nftables(c);
 
-        Assert.Contains("iifname \"enp1s0\" tcp dport { 22, 8080, 8081 } accept comment \"manage from internet side\"", text);
+        Assert.Contains("iifname \"enp1s0\" tcp dport { 22, 8080, 8081, 8443 } accept comment \"manage from internet side\"", text);
         Assert.DoesNotContain("masquerade", text);
+    }
+
+    [Theory]
+    [InlineData("8443")]
+    [InlineData("8000-9000")]
+    public void A_forward_cannot_take_the_app_port_while_the_firewall_is_managed_from_the_internet_side(string ports)
+    {
+        var c = Sample();
+        c.PortForwards.Clear();
+        c.PortForwards.Add(new PortForward { Name = "Taken", Protocol = Protocol.Tcp, ExternalPort = ports, InternalAddress = "192.168.50.10" });
+
+        Assert.Empty(ConfigValidator.Validate(c));
+
+        c.AllowManagementFromWan = true;
+        var issue = Assert.Single(ConfigValidator.Validate(c));
+        Assert.Contains("22, 8080, 8081 and 8443", issue.Message);
     }
 
     [Fact]
@@ -463,7 +479,7 @@ public class CoreTests
         Assert.Empty(ConfigValidator.Validate(c));
         var text = ConfigRenderer.Nftables(c);
 
-        Assert.Contains("iifname \"wlp3s0\" tcp dport { 22, 8080, 8081 } accept comment \"manage from maintenance port\"", text);
+        Assert.Contains("iifname \"wlp3s0\" tcp dport { 22, 8080, 8081, 8443 } accept comment \"manage from maintenance port\"", text);
         // It appears once, in the input chain: nothing is forwarded to or from it, and it gets no NAT.
         Assert.Single(text.Split('\n'), line => line.Contains("wlp3s0"));
 

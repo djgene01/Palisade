@@ -1,12 +1,14 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.DataProtection;
 using Palisade.Core;
 using Palisade.UI.Layout;
 using Palisade.UI.Services;
 using Palisade.Web.Components;
 using Palisade.Web.Components.Layout;
+using Palisade.Web.Components.Shared;
 using Palisade.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,14 +21,21 @@ Directory.CreateDirectory(dataDirectory);
 var backendKind = builder.Configuration["Palisade:Backend"] ?? (OperatingSystem.IsLinux() ? "agent" : "simulated");
 
 // The firewall rules open the default ports. Other ports are only for running on a development machine.
-var ports = new WebPorts(builder.Configuration.GetValue("Palisade:WebPort", PalisadeDefaults.WebPort), builder.Configuration.GetValue("Palisade:CheckPort", PalisadeDefaults.CheckPort));
+var ports = new WebPorts(builder.Configuration.GetValue("Palisade:WebPort", PalisadeDefaults.WebPort), builder.Configuration.GetValue("Palisade:CheckPort", PalisadeDefaults.CheckPort),
+    builder.Configuration.GetValue("Palisade:ApiPort", PalisadeDefaults.ApiPort));
 builder.Services.AddSingleton(ports);
+
+// The companion app's connection is encrypted with the firewall's own certificate, made on first start.
+var certificate = new FirewallCertificate(dataDirectory);
+builder.Services.AddSingleton(certificate);
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
     kestrel.ListenAnyIP(ports.Web);
     kestrel.ListenAnyIP(ports.Check);
+    kestrel.ListenAnyIP(ports.Api, listen => listen.UseHttps(certificate.Certificate));
 });
+builder.Services.ConfigureHttpJsonOptions(json => json.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
@@ -45,7 +54,9 @@ builder.Services.AddSingleton(new PasswordStore(dataDirectory));
 builder.Services.AddSingleton<IMakerSource>(new MakerLookup(dataDirectory, builder.Configuration.GetValue("Palisade:MakerLookup", backendKind != "simulated")));
 builder.Services.AddPalisadeUi();
 builder.Services.AddScoped<IConnectionProbe, BrowserProbe>();
-builder.Services.AddSingleton(new ShellOptions { SignOutButton = typeof(SignOutButton) });
+builder.Services.AddSingleton(new ShellOptions { SignOutButton = typeof(SignOutButton), AdvancedSections = [typeof(PhonePairing)] });
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(sp => new PairedDevices(dataDirectory, sp.GetRequiredService<TimeProvider>()));
 
 if (backendKind == "simulated")
 {
@@ -73,6 +84,8 @@ if (app.Services.GetRequiredService<IFirewallBackend>() is FirewallEngine simula
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 
+app.UseAppApiGate();
+
 // The second port answers one thing only: "a new connection still reaches the firewall".
 app.Use(async (context, next) =>
 {
@@ -93,6 +106,8 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "/";
     var isPublic = path is "/login" or "/setup" or "/Error"
+        // The companion app's interface checks its own device tokens instead of the session cookie.
+        || path.StartsWith(AppApi.Prefix + "/", StringComparison.Ordinal)
         || path.StartsWith("/_framework/", StringComparison.Ordinal)
         // The shared screens' stylesheet, script and font, served from the Palisade.UI library.
         || path.StartsWith("/_content/", StringComparison.Ordinal)
@@ -123,11 +138,17 @@ app.MapPost("/logout", async (HttpContext context) =>
     await context.SignOutAsync();
     return Results.Redirect("/login");
 }).DisableAntiforgery();
+// The installed release, as the installer recorded it next to the programs. A copy run from source says "dev".
+var versionFile = Path.Combine(builder.Environment.ContentRootPath, "..", "VERSION");
+app.MapAppApi(File.Exists(versionFile) ? File.ReadAllText(versionFile).Trim() : "dev");
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode().AddAdditionalAssemblies(typeof(MainLayout).Assembly);
 
 app.Run();
 
-public sealed record WebPorts(int Web, int Check);
+public sealed record WebPorts(int Web, int Check, int Api);
+
+/// <summary>Lets the tests start the whole web interface in memory.</summary>
+public partial class Program { }
 
 public static class SignIn
 {

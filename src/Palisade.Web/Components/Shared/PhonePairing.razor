@@ -1,0 +1,178 @@
+@implements IDisposable
+@using QRCoder
+@inject PairedDevices Paired
+@inject FirewallCertificate TlsCertificate
+@inject WebPorts Ports
+@inject NavigationManager Nav
+@inject TimeProvider Clock
+
+@* Lives on the firewall's own page only: linking a phone needs the password session this page already has. *@
+<section aria-labelledby="phones-title" class="panel mt-8 max-w-2xl p-5">
+    <h2 id="phones-title" class="text-xl font-bold">Phones and tablets</h2>
+    <p class="mt-1 text-muted">The Palisade app does everything this page does, from a phone or tablet on your home network. Each linked device gets its own key, and you can remove any of them here at any time.</p>
+
+    @if (_justLinked is not null)
+    {
+        <p role="status" class="mt-4 rounded-md border border-ok bg-ok-soft p-3 font-semibold">Linked <strong>@_justLinked</strong>. It can now manage this firewall.</p>
+    }
+
+    @if (_code is { } code)
+    {
+        <div class="mt-4 rounded-lg border-2 border-brand p-4">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
+                @* Black on white whatever the theme: phone cameras read that most reliably. *@
+                <img src="@_qr" width="200" height="200" class="shrink-0 rounded-md bg-white p-2"
+                     alt="QR code for linking the Palisade app. The same details are written next to it." />
+                <div class="min-w-0">
+                    <p class="font-bold">In the app, choose Link a firewall and scan this code.</p>
+                    <p class="mt-1 text-muted">Or type these in:</p>
+                    <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                        <dt class="text-muted">Address</dt><dd class="font-semibold break-all">@Host</dd>
+                        <dt class="text-muted">Code</dt><dd class="font-mono text-lg font-bold tracking-wider">@PairedDevices.Display(code.Code)</dd>
+                    </dl>
+                    <p class="mt-3 text-sm text-muted">
+                        The app shows the firewall's fingerprint before it links. It should start with
+                        <span class="font-mono break-all">@string.Join(':', TlsCertificate.ShortFingerprint.Split(':').Take(8))</span>.
+                    </p>
+                    <p class="mt-3 font-semibold" role="timer" aria-live="off">This code works once, for @Remaining more.</p>
+                    <button type="button" class="btn btn-quiet mt-2" @onclick="Cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+    else if (Paired.Devices.Count < PairedDevices.MaxDevices)
+    {
+        <button type="button" class="btn btn-primary mt-4" @onclick="Start"><Icon Name="devices" />Link a phone</button>
+    }
+    else
+    {
+        <p class="mt-4 text-muted">@PairedDevices.MaxDevices devices are linked, the most there can be. Remove one to link another.</p>
+    }
+
+    @if (Paired.Devices is { Count: > 0 } devices)
+    {
+        <ul class="mt-5 divide-y divide-line border-t border-line" aria-label="Linked devices">
+            @foreach (var device in devices.OrderBy(d => d.PairedAt))
+            {
+                <li class="flex flex-wrap items-center justify-between gap-3 py-3">
+                    <div class="min-w-0">
+                        <p class="font-semibold break-words">@device.Name</p>
+                        <p class="text-sm text-muted">Linked @When(device.PairedAt) · last used @When(device.LastSeen)</p>
+                    </div>
+                    @if (_removing == device.Id)
+                    {
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-sm">Remove it? It would need linking again.</span>
+                            <button type="button" class="btn btn-danger" @onclick="() => Remove(device.Id)">Remove</button>
+                            <button type="button" class="btn btn-quiet" @onclick="() => _removing = null">Keep</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-quiet" aria-label="@($"Remove {device.Name}")" @onclick="() => _removing = device.Id">Remove</button>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private PairingCode? _code;
+    private string _qr = "";
+    private string? _removing;
+    private string? _justLinked;
+    private int _linkedBefore;
+    private CancellationTokenSource? _ticking;
+
+    /// <summary>The address this browser reached the firewall on: the phone, on the same network, can reach it there too.</summary>
+    private string Host => new Uri(Nav.BaseUri).Host;
+
+    private string Remaining
+    {
+        get
+        {
+            var left = _code is null ? TimeSpan.Zero : _code.ExpiresAt - Clock.GetUtcNow();
+            if (left < TimeSpan.Zero) left = TimeSpan.Zero;
+            return $"{(int)left.TotalMinutes}:{left.Seconds:00}";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Paired.Changed += OnChanged;
+        _code = Paired.WaitingCode;
+        if (_code is not null) Show(_code);
+    }
+
+    private void Start()
+    {
+        _justLinked = null;
+        Show(Paired.NewCode());
+    }
+
+    private void Show(PairingCode code)
+    {
+        _code = code;
+        // Counted whenever a code goes on screen, also one already waiting when the page opened, so a code
+        // cancelled in another window is never mistaken for a device that just linked.
+        _linkedBefore = Paired.Devices.Count;
+        // Everything the app needs, in one link: where to go, which key to expect there, and the one-time code.
+        var link = $"palisade://pair?h={Uri.EscapeDataString(Host)}&p={Ports.Api}&k={TlsCertificate.Pin}&c={code.Code}";
+        using var data = QRCodeGenerator.GenerateQrCode(link, QRCodeGenerator.ECCLevel.M);
+        _qr = "data:image/png;base64," + Convert.ToBase64String(new PngByteQRCode(data).GetGraphic(8));
+        _ticking?.Cancel();
+        _ticking = new CancellationTokenSource();
+        _ = TickAsync(_ticking.Token);
+    }
+
+    private async Task TickAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                if (Paired.WaitingCode is null) _code = null;
+                await InvokeAsync(StateHasChanged);
+                if (_code is null) return;
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void Cancel()
+    {
+        Paired.CancelCode();
+        _code = null;
+        _ticking?.Cancel();
+    }
+
+    private void Remove(string id)
+    {
+        Paired.Remove(id);
+        _removing = null;
+        _justLinked = null;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(() =>
+    {
+        // The waiting code is gone and a device appeared: the phone in someone's hand just linked.
+        if (_code is not null && Paired.WaitingCode is null && Paired.Devices.Count > _linkedBefore)
+            _justLinked = Paired.Devices.OrderBy(d => d.PairedAt).Last().Name;
+        _code = Paired.WaitingCode;
+        StateHasChanged();
+    });
+
+    private string When(DateTimeOffset time)
+    {
+        var local = time.ToLocalTime();
+        return local.Date == DateTime.Today ? local.ToString("HH:mm") : local.ToString("d MMM yyyy");
+    }
+
+    public void Dispose()
+    {
+        Paired.Changed -= OnChanged;
+        _ticking?.Cancel();
+    }
+}

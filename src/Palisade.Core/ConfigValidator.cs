@@ -127,8 +127,8 @@ public static partial class ConfigValidator
                 Add(field, $"{f.Name}: a range of ports keeps the same numbers on the device, so leave the device port empty.");
             if (!f.Enabled) continue;
             if (f.Protocol != Protocol.Udp && c.AllowManagementFromWan
-                && new[] { PalisadeDefaults.WebPort, PalisadeDefaults.CheckPort, PalisadeDefaults.SshPort }.Any(p => range.Overlaps(new(p, p))))
-                Add(field, $"{f.Name}: ports {PalisadeDefaults.SshPort}, {PalisadeDefaults.WebPort} and {PalisadeDefaults.CheckPort} are used to manage this firewall from the internet side.");
+                && PalisadeDefaults.ManagementPorts.Any(p => range.Overlaps(new(p, p))))
+                Add(field, $"{f.Name}: ports {string.Join(", ", PalisadeDefaults.ManagementPorts[..^1])} and {PalisadeDefaults.ManagementPorts[^1]} are used to manage this firewall from the internet side.");
             foreach (var other in seen)
                 if (other.Range.Overlaps(range) && SharesProtocol(other.Protocol, f.Protocol))
                     Add(field, $"{f.Name}: port {range} is already opened by \"{other.Name}\".");

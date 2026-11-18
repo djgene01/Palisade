@@ -33,6 +33,12 @@ public sealed class ShellOptions
     /// parameter, <c>Sidebar</c>: true in the side menu, false in the footer shown on small screens.
     /// </summary>
     public Type? SignOutButton { get; init; }
+
+    /// <summary>
+    /// Extra sections for the Advanced page that only this host can offer, such as linking phones on the
+    /// firewall itself. Each is a component without parameters, shown after the updates section.
+    /// </summary>
+    public IReadOnlyList<Type> AdvancedSections { get; init; } = [];
 }
 
 public static class PalisadeUiServices
