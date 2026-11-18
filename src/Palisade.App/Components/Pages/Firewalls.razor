@@ -63,10 +63,37 @@
     <a href="/" class="btn btn-quiet mt-2 justify-center">Back to @Active.Name</a>
 }
 
+<section aria-labelledby="device-title" class="panel mt-10 p-4">
+    <h2 id="device-title" class="text-xl font-bold">This device</h2>
+    <div class="mt-3 flex items-start justify-between gap-4">
+        <div>
+            <p class="font-semibold">Lock Palisade</p>
+            <p class="text-sm text-muted">Ask for your fingerprint, face or screen lock when Palisade opens, and when you come back to it after a minute away.</p>
+        </div>
+        <Toggle Value="Lock.Enabled" ValueChanged="SetLockAsync" Label="Lock Palisade" Disabled="_busy" />
+    </div>
+    @if (_lockProblem is not null)
+    {
+        <p role="status" class="mt-3 text-sm">@_lockProblem</p>
+    }
+</section>
+
 @code {
     private string? _unlinking;
     private string? _message;
+    private string? _lockProblem;
     private bool _busy;
+
+    [Inject] private AppLock Lock { get; set; } = default!;
+
+    private async Task SetLockAsync(bool on)
+    {
+        _busy = true;
+        _lockProblem = null;
+        if (on) _lockProblem = await Lock.TurnOnAsync();
+        else Lock.TurnOff();
+        _busy = false;
+    }
 
     private Task ShowAsync(FirewallLink link) => Switcher.ShowAsync(link);
 

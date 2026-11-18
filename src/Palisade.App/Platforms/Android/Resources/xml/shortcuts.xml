@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon: straight to the two pages used most on the go. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="devices"
+        android:enabled="true"
+        android:icon="@mipmap/appicon"
+        android:shortcutShortLabel="@string/shortcut_devices_short"
+        android:shortcutLongLabel="@string/shortcut_devices_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.djgene01.palisade"
+            android:targetClass="io.github.djgene01.palisade.MainActivity"
+            android:data="palisade://open/devices" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="filter"
+        android:enabled="true"
+        android:icon="@mipmap/appicon"
+        android:shortcutShortLabel="@string/shortcut_filter_short"
+        android:shortcutLongLabel="@string/shortcut_filter_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.djgene01.palisade"
+            android:targetClass="io.github.djgene01.palisade.MainActivity"
+            android:data="palisade://open/filter" />
+    </shortcut>
+</shortcuts>

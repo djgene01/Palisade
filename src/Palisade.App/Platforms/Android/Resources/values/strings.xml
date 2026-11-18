@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_devices_short">Pause a device</string>
+    <string name="shortcut_devices_long">Pause or limit a device</string>
+    <string name="shortcut_filter_short">Content filter</string>
+    <string name="shortcut_filter_long">Block or allow sites</string>
+</resources>

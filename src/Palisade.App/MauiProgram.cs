@@ -43,6 +43,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<IConnectionProbe>(active);
         builder.Services.AddSingleton<IMakerSource>(active);
         builder.Services.AddSingleton<QrScanner>();
+        builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<AppLock>();
+        builder.Services.AddSingleton<AppLinks>();
         builder.Services.AddScoped<FirewallSwitcher>();
         builder.Services.AddSingleton(new ShellOptions
         {
