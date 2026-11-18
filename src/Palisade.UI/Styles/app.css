@@ -1,5 +1,9 @@
 @import "tailwindcss";
-@source "../Components";
+@source "../Layout";
+@source "../Pages";
+@source "../Shared";
+/* The web interface's own pages (sign-in, setup) use this stylesheet too. */
+@source "../../Palisade.Web/Components";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -10,7 +14,8 @@
     font-style: normal;
     font-weight: 200 800;
     font-display: swap;
-    src: url("/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2");
+    /* Relative to the compiled app.css, which each host serves from its own place. */
+    src: url("fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2");
 }
 
 /* Palette: night-sky navy with one blue for controls. Each other colour has a single job:

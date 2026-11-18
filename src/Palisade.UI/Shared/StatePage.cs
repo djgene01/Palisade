@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Components;
 using Palisade.Core;
-using Palisade.Web.Services;
+using Palisade.UI.Services;
 
-namespace Palisade.Web.Components.Shared;
+namespace Palisade.UI.Shared;
 
 /// <summary>Base for pages that show firewall state: re-renders whenever the shared state changes.</summary>
 public abstract class StatePage : ComponentBase, IDisposable

@@ -1,7 +1,6 @@
 @implements IDisposable
 @inject FirewallState State
-@inject IJSRuntime JS
-@inject WebPorts Ports
+@inject IConnectionProbe Probe
 
 @* Every change goes live first and is only kept once a brand-new connection to the firewall succeeds.
    If it does not, the owner gets a countdown and the agent undoes the change by itself. *@
@@ -68,9 +67,9 @@
         bool reachable;
         try
         {
-            reachable = await JS.InvokeAsync<bool>("palisade.checkReachable", cts.Token, Ports.Check);
+            reachable = await Probe.CanReachAsync(cts.Token);
         }
-        catch (Exception ex) when (ex is JSException or OperationCanceledException or JSDisconnectedException)
+        catch (OperationCanceledException)
         {
             reachable = false;
         }

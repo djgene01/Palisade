@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Palisade.Core\Palisade.Core.csproj" />
+    <!-- The screens and the stylesheet live there, shared with the companion app. -->
+    <ProjectReference Include="..\Palisade.UI\Palisade.UI.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -12,15 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Remove="package.json;package-lock.json;data\**" />
-    <None Include="package.json;package-lock.json" />
-    <TailwindInput Include="Styles\app.css;Components\**\*.razor" />
+    <Content Remove="data\**" />
   </ItemGroup>
-
-  <!-- Compiles Tailwind into wwwroot/app.css as part of every build and publish, so the Debian box never needs Node. -->
-  <Target Name="TailwindBuild" BeforeTargets="ResolveProjectStaticWebAssets" Inputs="@(TailwindInput)" Outputs="wwwroot\app.css">
-    <Exec Command="npm install" Condition="!Exists('node_modules')" />
-    <Exec Command="npx @tailwindcss/cli -i Styles/app.css -o wwwroot/app.css --minify" />
-  </Target>
 
 </Project>

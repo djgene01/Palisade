@@ -3,6 +3,7 @@
 @inject FirewallState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ShellOptions Shell
 
 <a href="@(new Uri(Nav.Uri).AbsolutePath)#main" class="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface focus:p-3">Skip to content</a>
 
@@ -45,9 +46,10 @@
             <button type="button" class="nav-link w-full cursor-pointer" @onclick="ToggleThemeAsync">
                 <Icon Name="@(_dark ? "sun" : "moon")" />@(_dark ? "Use light colours" : "Use dark colours")
             </button>
-            <form method="post" action="/logout">
-                <button type="submit" class="nav-link w-full cursor-pointer"><Icon Name="sign-out" />Sign out</button>
-            </form>
+            @if (Shell.SignOutButton is { } signOut)
+            {
+                <DynamicComponent Type="signOut" Parameters="Sidebar" />
+            }
         </div>
     </header>
 
@@ -73,9 +75,10 @@
 
         <div class="mt-12 flex flex-wrap gap-2 border-t border-line pt-4 md:hidden">
             <button type="button" class="btn btn-quiet" @onclick="ToggleThemeAsync">@(_dark ? "Use light colours" : "Use dark colours")</button>
-            <form method="post" action="/logout">
-                <button type="submit" class="btn btn-quiet">Sign out</button>
-            </form>
+            @if (Shell.SignOutButton is { } footerSignOut)
+            {
+                <DynamicComponent Type="footerSignOut" Parameters="Footer" />
+            }
         </div>
     </main>
 </div>
@@ -94,6 +97,9 @@
         ("/", "Overview", "home"), ("/devices", "Devices", "devices"), ("/filter", "Content filter", "shield"), ("/ports", "Open ports", "ports"),
         ("/rules", "Rules", "rules"), ("/network", "Network", "globe"), ("/advanced", "Advanced", "advanced"),
     ];
+
+    private static readonly Dictionary<string, object> Sidebar = new() { ["Sidebar"] = true };
+    private static readonly Dictionary<string, object> Footer = new() { ["Sidebar"] = false };
 
     private bool _dark;
 

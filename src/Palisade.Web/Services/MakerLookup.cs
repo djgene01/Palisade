@@ -10,7 +10,7 @@ namespace Palisade.Web.Services;
 /// address. Only those six digits are sent, never the whole address. Answers are kept on disk, so each
 /// manufacturer is asked about once. Lookups run in the background: a page never waits for one.
 /// </summary>
-public sealed class MakerLookup
+public sealed class MakerLookup : Palisade.UI.Services.IMakerSource
 {
     private static readonly TimeSpan RetryAfter = TimeSpan.FromHours(1);
 

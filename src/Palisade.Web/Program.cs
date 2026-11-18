@@ -3,7 +3,10 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Palisade.Core;
+using Palisade.UI.Layout;
+using Palisade.UI.Services;
 using Palisade.Web.Components;
+using Palisade.Web.Components.Layout;
 using Palisade.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -39,8 +42,10 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton(new PasswordStore(dataDirectory));
 // Asking who made a device goes out to the internet, so the demo on a development machine leaves it off unless told otherwise.
-builder.Services.AddSingleton(new MakerLookup(dataDirectory, builder.Configuration.GetValue("Palisade:MakerLookup", backendKind != "simulated")));
-builder.Services.AddScoped<FirewallState>();
+builder.Services.AddSingleton<IMakerSource>(new MakerLookup(dataDirectory, builder.Configuration.GetValue("Palisade:MakerLookup", backendKind != "simulated")));
+builder.Services.AddPalisadeUi();
+builder.Services.AddScoped<IConnectionProbe, BrowserProbe>();
+builder.Services.AddSingleton(new ShellOptions { SignOutButton = typeof(SignOutButton) });
 
 if (backendKind == "simulated")
 {
@@ -89,7 +94,8 @@ app.Use(async (context, next) =>
     var path = context.Request.Path.Value ?? "/";
     var isPublic = path is "/login" or "/setup" or "/Error"
         || path.StartsWith("/_framework/", StringComparison.Ordinal)
-        || path.StartsWith("/fonts/", StringComparison.Ordinal)
+        // The shared screens' stylesheet, script and font, served from the Palisade.UI library.
+        || path.StartsWith("/_content/", StringComparison.Ordinal)
         || path.EndsWith(".css", StringComparison.Ordinal)
         || path.EndsWith(".js", StringComparison.Ordinal);
     if (isPublic || context.User.Identity?.IsAuthenticated == true)
@@ -117,7 +123,7 @@ app.MapPost("/logout", async (HttpContext context) =>
     await context.SignOutAsync();
     return Results.Redirect("/login");
 }).DisableAntiforgery();
-app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+app.MapRazorComponents<App>().AddInteractiveServerRenderMode().AddAdditionalAssemblies(typeof(MainLayout).Assembly);
 
 app.Run();
 

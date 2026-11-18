@@ -436,7 +436,8 @@ git push origin v1.3
 ```
 src/Palisade.Core     Configuration model, validation and the generators for nftables and dnsmasq (no system access)
 src/Palisade.Agent    The root service: applies configurations, reads usage, installs updates
-src/Palisade.Web      The Blazor web interface
+src/Palisade.UI       The screens and stylesheet, shared by the web interface and the coming companion app
+src/Palisade.Web      The web interface host: sign-in, setup, and the connection to the agent
 tests/                Unit tests for Palisade.Core
 deploy/               Installer, systemd units and the Windows publish script
 ```
