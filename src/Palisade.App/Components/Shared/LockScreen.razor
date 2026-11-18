@@ -1,0 +1,33 @@
+@inject AppLock Lock
+
+<main id="main" class="mx-auto flex min-h-dvh max-w-lg flex-col items-center justify-center px-4 text-center">
+    <Stakes Count="3" Class="h-12 text-brand" />
+    <h1 class="mt-6 text-3xl font-extrabold" tabindex="-1">Palisade is locked</h1>
+    <p class="mt-2 text-muted">Confirm it's you to see and change your firewall.</p>
+    @if (_failed)
+    {
+        <p role="status" class="mt-4 text-muted">Not unlocked. Try again when you're ready.</p>
+    }
+    <button type="button" class="btn btn-primary mt-6 px-8 py-3 text-lg" disabled="@_asking" @onclick="UnlockAsync">Unlock</button>
+</main>
+
+@code {
+    private bool _asking;
+    private bool _failed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Ask straight away; the button is there for after a cancel.
+        if (firstRender) await UnlockAsync();
+    }
+
+    private async Task UnlockAsync()
+    {
+        _asking = true;
+        _failed = false;
+        StateHasChanged();
+        _failed = !await Lock.UnlockAsync();
+        _asking = false;
+        StateHasChanged();
+    }
+}

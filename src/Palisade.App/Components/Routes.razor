@@ -1,18 +1,45 @@
-﻿@inject ActiveFirewall Active
+﻿@implements IDisposable
+@inject ActiveFirewall Active
+@inject AppLock Lock
+@inject AppLinks Links
 @inject NavigationManager Nav
 
-@* The firewall's pages come from the shared Palisade.UI library; the app adds its own for linking and choosing firewalls. *@
-<Router AppAssembly="typeof(Routes).Assembly" AdditionalAssemblies="[typeof(MainLayout).Assembly]" NotFoundPage="typeof(Palisade.UI.Pages.NotFound)">
-    <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
-    </Found>
-</Router>
+@* While locked, nothing of the firewall is even on the page: only the lock screen is drawn. *@
+@if (Lock.Locked)
+{
+    <LockScreen />
+}
+else
+{
+    @* The firewall's pages come from the shared Palisade.UI library; the app adds its own for linking, choosing firewalls and sharing. *@
+    <Router AppAssembly="typeof(Routes).Assembly" AdditionalAssemblies="[typeof(MainLayout).Assembly]" NotFoundPage="typeof(Palisade.UI.Pages.NotFound)">
+        <Found Context="routeData">
+            <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+    </Router>
+}
 
 @code {
     protected override void OnInitialized()
     {
-        // Nothing to show yet: start with linking a firewall or trying the demo.
-        if (!Active.IsChosen) Nav.NavigateTo("/start", replace: true);
+        Lock.Changed += OnLockChanged;
+        Links.Arrived += OnLinkArrived;
+        // Opened by a link, a share or a shortcut: go there. Otherwise, with nothing to show yet, start with linking or the demo.
+        if (Links.Take() is { } page) Nav.NavigateTo(page, replace: true);
+        else if (!Active.IsChosen) Nav.NavigateTo("/start", replace: true);
+    }
+
+    private void OnLockChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnLinkArrived() => _ = InvokeAsync(() =>
+    {
+        if (Links.Take() is { } page) Nav.NavigateTo(page);
+    });
+
+    public void Dispose()
+    {
+        Lock.Changed -= OnLockChanged;
+        Links.Arrived -= OnLinkArrived;
     }
 }

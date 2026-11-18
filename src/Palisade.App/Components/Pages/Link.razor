@@ -3,6 +3,7 @@
 @inject ActiveFirewall Active
 @inject FirewallSwitcher Switcher
 @inject QrScanner Scanner
+@inject FirewallStore Store
 
 <PageTitle>Link your firewall · Palisade</PageTitle>
 
@@ -32,10 +33,30 @@
         break;
 
     case Step.Scanned:
-        <div class="panel mt-6 p-4">
-            <p class="font-bold">Firewall at @_address!.Host</p>
-            <p class="mt-1 text-sm text-muted">Fingerprint <span class="font-mono">@CertificatePin.Display(_pin!)</span>, the same one the firewall's page shows.</p>
-        </div>
+        @if (_fromOutside)
+        {
+            @* A link can come from anywhere, a web page included, so the owner checks it against the firewall's own page. *@
+            <div class="panel mt-6 border-warn p-4">
+                <p class="font-bold">Firewall at @_address!.Host</p>
+                <p class="mt-2">This link came from outside Palisade. Before linking, check that your firewall's page shows this address and this fingerprint:</p>
+                <p class="mt-2 font-mono text-lg font-bold tracking-wide">@CertificatePin.Display(_pin!)</p>
+            </div>
+        }
+        else
+        {
+            <div class="panel mt-6 p-4">
+                <p class="font-bold">Firewall at @_address!.Host</p>
+                <p class="mt-1 text-sm text-muted">Fingerprint <span class="font-mono">@CertificatePin.Display(_pin!)</span>, read from the code on the firewall's page.</p>
+            </div>
+        }
+        @if (Replaces is { } existing)
+        {
+            <p role="alert" class="mt-4 rounded-md border border-danger bg-danger-soft p-3">
+                This device is already linked to a firewall at @existing.Host with a different fingerprint
+                (<span class="font-mono">@CertificatePin.Display(existing.Pin, 4)</span>). Linking replaces that link.
+                Unless you replaced or reset your firewall, don't link: something else may be using its address.
+            </p>
+        }
         <DeviceName @bind-Value="_name" />
         <button type="button" class="btn btn-primary mt-5 w-full justify-center py-3" disabled="@_busy" @onclick="LinkAsync">@(_busy ? "Linking" : "Link this device")</button>
         <button type="button" class="btn btn-quiet mt-2 w-full justify-center" disabled="@_busy" @onclick="() => Go(Step.Choose)">Back</button>
@@ -91,6 +112,38 @@
     // What the firewall's list of linked devices will call this one. The phone's own name is a good start.
     private string _name = DeviceInfo.Current.Name;
 
+    // True when the link came from outside the app (another app, a web page), not from the app's own scanner.
+    private bool _fromOutside;
+
+    /// <summary>A pairing link handed over by the phone, for example when its own camera app read the code.</summary>
+    [SupplyParameterFromQuery] public string? Invite { get; set; }
+
+    /// <summary>A link this would replace: same address, different key. Worth a clear warning.</summary>
+    private FirewallLink? Replaces => _address is null ? null
+        : Store.Links.FirstOrDefault(l => l.Host == _address.Host && l.Port == _address.Port && l.Pin != _pin);
+
+    protected override void OnParametersSet()
+    {
+        if (Invite is null) return;
+        // Nothing happens until the owner presses Link: a link from a web page could point anywhere, so the
+        // address and fingerprint are shown first, with a request to compare them with the firewall's page.
+        ShowInvite(Invite, "That link is not a Palisade linking code. Use the one on the firewall's Advanced page.", fromOutside: true);
+        Invite = null;
+    }
+
+    private void ShowInvite(string text, string otherwise, bool fromOutside)
+    {
+        if (PairingLinks.Parse(text) is not { } invite)
+        {
+            _problem = otherwise;
+            _step = Step.Choose;
+            return;
+        }
+        (_address, _pin, _code, _fromOutside) = (invite.Address, invite.Address.Pin, invite.Code, fromOutside);
+        _problem = null;
+        _step = Step.Scanned;
+    }
+
     private void Go(Step step)
     {
         _problem = null;
@@ -100,14 +153,7 @@
     private async Task ScanAsync() => await BusyAsync(async () =>
     {
         var text = await Scanner.ScanAsync();
-        if (text is null) return;
-        if (PairingLinks.Parse(text) is not { } invite)
-        {
-            _problem = "That code is not a Palisade linking code. Scan the one on the firewall's Advanced page.";
-            return;
-        }
-        (_address, _pin, _code) = (invite.Address, invite.Address.Pin, invite.Code);
-        _step = Step.Scanned;
+        if (text is not null) ShowInvite(text, "That code is not a Palisade linking code. Scan the one on the firewall's Advanced page.", fromOutside: false);
     });
 
     private async Task IntroduceAsync() => await BusyAsync(async () =>

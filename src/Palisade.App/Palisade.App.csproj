@@ -48,4 +48,13 @@
         <ProjectReference Include="..\Palisade.Client\Palisade.Client.csproj" />
     </ItemGroup>
 
+    <!-- Android's fingerprint, face and screen-lock prompt for the app lock. Biometric brings newer AndroidX
+         Fragment and LiveData than MAUI's own companions expect, so those companions are lifted to match. -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-android'">
+        <PackageReference Include="Xamarin.AndroidX.Biometric" Version="1.1.0.33" />
+        <PackageReference Include="Xamarin.AndroidX.Fragment.Ktx" Version="1.8.9.4" />
+        <PackageReference Include="Xamarin.AndroidX.Lifecycle.LiveData" Version="2.11.0.1" />
+        <PackageReference Include="Xamarin.AndroidX.Lifecycle.LiveData.Core.Ktx" Version="2.11.0.1" />
+    </ItemGroup>
+
 </Project>

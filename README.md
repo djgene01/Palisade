@@ -282,6 +282,14 @@ The Palisade app for Android and Windows does everything the firewall's own page
 
 The app can link several firewalls and switch between them. **Try the demo** shows a pretend network inside the app, for looking around.
 
+**On Android you can also:**
+
+- **Scan with the phone's own camera.** If your camera app offers to open the code on the firewall's page, it opens Palisade ready to link. Palisade then shows the address and fingerprint to check against the page before anything is sent.
+- **Share a page to Palisade.** In the browser, choose **Share → Block or allow in Palisade**. The app shows the site's name and lets you block it for everyone or always allow it.
+- **Use the shortcuts on the app icon.** Long-press the icon for **Pause a device** and **Content filter**.
+
+**Lock the app.** In **Firewalls → This device**, switch on **Lock Palisade**. It then asks for your fingerprint, face or screen lock (Windows Hello on Windows) when it opens, and when you come back to it after a minute away.
+
 > **Note:** After a change, the app checks for a few seconds that it can still reach the firewall, then keeps the change. Stay in the app until it says **Saved**. If you leave too early, the firewall undoes the change after a minute, as it does whenever it can't be sure you are not locked out.
 
 ---
