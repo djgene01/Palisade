@@ -21,12 +21,14 @@ jobs:
         with:
           node-version: "22"
 
-      # Only the firewall's own projects: the solution also holds the companion app, which needs the MAUI workload.
+      # Each test project by name: the solution also holds the companion app, which needs the MAUI workload.
+      # The client tests start the real web interface on free local ports and talk to it over TLS.
       - name: Test
         run: |
           set -eu
           dotnet test tests/Palisade.Core.Tests --nologo
           dotnet test tests/Palisade.Web.Tests --nologo
+          dotnet test tests/Palisade.Client.Tests --nologo
 
       - name: Build the package
         run: |

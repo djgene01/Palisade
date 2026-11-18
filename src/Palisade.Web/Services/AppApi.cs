@@ -3,16 +3,6 @@ using Palisade.UI.Services;
 
 namespace Palisade.Web.Services;
 
-/// <summary>What the firewall says about itself before pairing: enough for the app to know it found the right thing.</summary>
-public sealed record ApiInfo(string Product, int Api, string Version);
-
-public sealed record PairRequest(string? Code, string? Name);
-
-public sealed record PairResponse(string DeviceId, string Token);
-
-/// <summary>A problem in plain words, the same kind the web pages show.</summary>
-public sealed record ApiProblem(string Problem);
-
 /// <summary>
 /// The companion app's interface. It offers exactly what the web pages can do, through the same backend, so
 /// every change is still checked by the agent and still waits for confirmation. It answers only on the
@@ -20,9 +10,8 @@ public sealed record ApiProblem(string Problem);
 /// </summary>
 public static class AppApi
 {
-    /// <summary>Raised when the app's interface changes in a way older apps cannot follow.</summary>
-    public const int Version = 1;
-    public const string Prefix = "/api/v1";
+    public const int Version = AppContract.Version;
+    public const string Prefix = AppContract.Prefix;
 
     private const string DeviceItem = "palisade.device";
 
@@ -81,7 +70,7 @@ public static class AppApi
         api.MapPost("/update/install", (IUpdates u, CancellationToken ct) => u.CheckUpdateAsync(install: true, ct));
         // Who made each device. Unknown makers come back as null while the firewall looks them up.
         api.MapGet("/makers", (string[] mac, IMakerSource makers) =>
-            mac.Take(256).Distinct().ToDictionary(m => m, m => makers.Find(m)));
+            mac.Take(AppContract.MakersPerRequest).Distinct().ToDictionary(m => m, m => makers.Find(m)));
         // Lets the app forget the firewall cleanly: its own token stops working.
         api.MapPost("/unpair", (HttpContext context, PairedDevices devices) =>
         {

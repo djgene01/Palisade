@@ -400,7 +400,18 @@ Found a security problem? Please open an issue without the details and ask for a
 ```bash
 git clone https://github.com/djgene01/Palisade.git
 cd Palisade
-dotnet test
+dotnet test tests/Palisade.Core.Tests
+dotnet test tests/Palisade.Web.Tests
+dotnet test tests/Palisade.Client.Tests
+```
+
+Name the test projects as shown. A plain `dotnet test` at the top also builds the companion app, which needs the .NET MAUI workload (`dotnet workload install maui`). The client tests start the real web interface on free local ports and talk to it over HTTPS.
+
+**The companion app** (`src/Palisade.App`, in progress) needs the MAUI workload. On Windows it builds for Windows and Android. For now it runs against a demo firewall built into the app:
+
+```bash
+dotnet build src/Palisade.App -f net10.0-windows10.0.19041.0
+dotnet build src/Palisade.App -f net10.0-android -t:Run     # on a running emulator or a connected phone
 ```
 
 **Run the web interface on your own computer.** On Windows or macOS it uses a simulated firewall, so you can try every page safely:
@@ -438,9 +449,11 @@ git push origin v1.3
 ```
 src/Palisade.Core     Configuration model, validation and the generators for nftables and dnsmasq (no system access)
 src/Palisade.Agent    The root service: applies configurations, reads usage, installs updates
-src/Palisade.UI       The screens and stylesheet, shared by the web interface and the coming companion app
-src/Palisade.Web      The web interface host: sign-in, setup, and the connection to the agent
-tests/                Unit tests for Palisade.Core, and tests that run the web interface and app interface in memory
+src/Palisade.UI       The screens and stylesheet, shared by the web interface and the companion app
+src/Palisade.Web      The web interface host: sign-in, setup, the app interface and phone pairing, and the connection to the agent
+src/Palisade.Client   How the app reaches a real firewall: pairing links, the pinned HTTPS connection, RemoteBackend
+src/Palisade.App      The companion app (.NET MAUI Blazor Hybrid) for Android and Windows
+tests/                Core unit tests, the web interface run in memory, and the client against a running web interface
 deploy/               Installer, systemd units and the Windows publish script
 ```
 
