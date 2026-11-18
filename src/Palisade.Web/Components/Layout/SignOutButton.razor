@@ -1,0 +1,16 @@
+@* Signing out has to clear the session cookie, which only a plain HTTP response can do, so this is a form. *@
+<form method="post" action="/logout">
+    @if (Sidebar)
+    {
+        <button type="submit" class="nav-link w-full cursor-pointer"><Icon Name="sign-out" />Sign out</button>
+    }
+    else
+    {
+        <button type="submit" class="btn btn-quiet">Sign out</button>
+    }
+</form>
+
+@code {
+    /// <summary>True in the side menu, false in the footer shown on small screens.</summary>
+    [Parameter] public bool Sidebar { get; set; }
+}

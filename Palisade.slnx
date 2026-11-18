@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Palisade.Agent/Palisade.Agent.csproj" />
     <Project Path="src/Palisade.Core/Palisade.Core.csproj" />
+    <Project Path="src/Palisade.UI/Palisade.UI.csproj" />
     <Project Path="src/Palisade.Web/Palisade.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">

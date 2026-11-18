@@ -1,7 +1,7 @@
 @page "/welcome"
 @inherits StatePage
 @inject NavigationManager Nav
-@inject IJSRuntime JS
+@inject IConnectionProbe Probe
 
 <PageTitle>Set up · Palisade</PageTitle>
 
@@ -127,7 +127,7 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        _clientAddress = await JS.InvokeAsync<string>("palisade.whoAmI");
+        _clientAddress = await Probe.ClientAddressAsync();
         // Before setup the home network has no addresses yet, so a visitor inside the internet-side range came in that way.
         _clientOnWanSide = Ip4.TryParse(_clientAddress, out var client)
             && AddressSpec.TryParseCidr(WanAddress, out var wan, out var prefix) && client.IsIn(wan, prefix);

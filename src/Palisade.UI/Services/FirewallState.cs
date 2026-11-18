@@ -1,7 +1,7 @@
 using System.Globalization;
 using Palisade.Core;
 
-namespace Palisade.Web.Services;
+namespace Palisade.UI.Services;
 
 public sealed record Device(string Name, string Address, string Mac, bool Online, Reservation? Reservation, FirewallRule? BlockRule)
 {
@@ -36,7 +36,7 @@ public sealed record Device(string Name, string Address, string Mac, bool Online
 }
 
 /// <summary>One per browser session: the loaded config and live status, plus the single path for saving changes.</summary>
-public sealed class FirewallState(IFirewallBackend backend, MakerLookup makers)
+public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
 {
     public FirewallConfig? Config { get; private set; }
     public SystemStatus? Status { get; private set; }
