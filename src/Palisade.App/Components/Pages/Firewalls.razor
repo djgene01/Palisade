@@ -1,0 +1,87 @@
+@page "/firewalls"
+@layout AppLayout
+@inject ActiveFirewall Active
+@inject FirewallStore Store
+@inject FirewallSwitcher Switcher
+@inject NavigationManager Nav
+
+<PageTitle>Firewalls · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold" tabindex="-1">Firewalls</h1>
+<p class="mt-2 text-muted">The firewalls this device is linked to. Choose one to show it.</p>
+
+@if (_message is not null)
+{
+    <p role="status" class="mt-5 rounded-md border border-line bg-sunk p-3">@_message</p>
+}
+
+<ul class="mt-6 space-y-3" aria-label="Linked firewalls">
+    @foreach (var link in Store.Links)
+    {
+        var current = Active.Link?.DeviceId == link.DeviceId;
+        <li class="panel p-4 @(current ? "border-brand" : "")">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="font-bold break-all">Firewall at @link.Host</p>
+                    <p class="text-sm text-muted">Fingerprint <span class="font-mono">@CertificatePin.Display(link.Pin, 4)</span>@(current ? " · showing now" : "")</p>
+                </div>
+                <div class="flex gap-2">
+                    @if (!current)
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="() => ShowAsync(link)">Show</button>
+                    }
+                    <button type="button" class="btn btn-quiet" aria-label="@($"Unlink the firewall at {link.Host}")" @onclick="() => _unlinking = link.DeviceId">Unlink</button>
+                </div>
+            </div>
+            @if (_unlinking == link.DeviceId)
+            {
+                <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                    <span>Unlink it? This device would need linking again to manage it.</span>
+                    <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="() => UnlinkAsync(link)">Unlink</button>
+                    <button type="button" class="btn btn-quiet" @onclick="() => _unlinking = null">Keep</button>
+                </div>
+            }
+        </li>
+    }
+    <li class="panel p-4 @(Active.IsDemo ? "border-brand" : "")">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <p class="font-bold">Demo firewall</p>
+                <p class="text-sm text-muted">A pretend network inside the app@(Active.IsDemo ? " · showing now" : "")</p>
+            </div>
+            @if (!Active.IsDemo)
+            {
+                <button type="button" class="btn btn-quiet" @onclick="ShowDemoAsync">Show</button>
+            }
+        </div>
+    </li>
+</ul>
+
+<a href="/link" class="btn btn-primary mt-6 justify-center py-3"><Icon Name="firewalls" />Link another firewall</a>
+@if (Active.IsChosen)
+{
+    <a href="/" class="btn btn-quiet mt-2 justify-center">Back to @Active.Name</a>
+}
+
+@code {
+    private string? _unlinking;
+    private string? _message;
+    private bool _busy;
+
+    private Task ShowAsync(FirewallLink link) => Switcher.ShowAsync(link);
+
+    private Task ShowDemoAsync() => Switcher.ShowDemoAsync();
+
+    private async Task UnlinkAsync(FirewallLink link)
+    {
+        _busy = true;
+        // The firewall is told first, so the key stops working there too. Out of reach, the owner removes it on its page.
+        var told = await Switcher.UnlinkAsync(link);
+        _unlinking = null;
+        _busy = false;
+        _message = told
+            ? $"Unlinked the firewall at {link.Host}."
+            : $"Unlinked here, but the firewall at {link.Host} could not be reached to tell it. Remove this device on its page too: Advanced, then Phones and tablets.";
+        if (!Active.IsChosen && Store.Links.Count == 0) Nav.NavigateTo("/start");
+    }
+}

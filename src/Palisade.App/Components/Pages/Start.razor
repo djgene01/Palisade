@@ -1,0 +1,24 @@
+@page "/start"
+@layout AppLayout
+@inject FirewallStore Store
+@inject FirewallSwitcher Switcher
+
+<PageTitle>Welcome · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold" tabindex="-1">Your firewall, on your phone</h1>
+<p class="mt-3 text-lg text-muted">This app shows and changes everything your Palisade firewall's own page does: pausing devices, the content filter, open ports and the rest. It works from your home network.</p>
+
+<div class="mt-8 flex flex-col gap-3">
+    <a href="/link" class="btn btn-primary justify-center py-3 text-lg"><Icon Name="firewalls" />Link your firewall</a>
+    @if (Store.Links.Count > 0)
+    {
+        <a href="/firewalls" class="btn btn-quiet justify-center py-3">Choose a linked firewall</a>
+    }
+    <button type="button" class="btn btn-quiet justify-center py-3" @onclick="TryDemoAsync">Try the demo</button>
+</div>
+
+<p class="mt-8 text-sm text-muted">The demo is a pretend network inside the app, for looking around. Nothing you do there reaches a real firewall.</p>
+
+@code {
+    private Task TryDemoAsync() => Switcher.ShowDemoAsync();
+}

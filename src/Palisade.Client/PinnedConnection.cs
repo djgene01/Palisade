@@ -8,7 +8,7 @@ using Palisade.Core;
 namespace Palisade.Client;
 
 /// <summary>A problem reaching or using a firewall, already in the plain words the app shows.</summary>
-public class FirewallException(string message, Exception? inner = null) : Exception(message, inner);
+public class FirewallException(string message, Exception? inner = null) : PlainWordsException(message, inner);
 
 /// <summary>The firewall no longer knows this device: its link was removed there, or the firewall was reset.</summary>
 public sealed class LinkRemovedException(string message) : FirewallException(message);

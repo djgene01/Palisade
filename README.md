@@ -30,6 +30,7 @@
 - [Install on Debian](#install-on-debian)
 - [Install on Ubuntu Server](#install-on-ubuntu-server)
 - [First-time setup](#first-time-setup)
+- [The companion app](#the-companion-app)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
 - [Uninstalling](#uninstalling)
@@ -268,6 +269,23 @@ From here everything is done in the browser: **Overview**, **Devices**, **Conten
 
 ---
 
+## The companion app
+
+The Palisade app for Android and Windows does everything the firewall's own page does: pause a device, change the content filter, open a port, and the rest. It works from your home network. It is not published in an app store yet, so for now you build it yourself (see [Building from source](#building-from-source)).
+
+**Link a phone or tablet:**
+
+1. On a computer, open the firewall's page and go to **Advanced → Phones and tablets**, then choose **Link a phone**. A QR code and an 8-character code appear, valid for 5 minutes.
+2. In the app, choose **Link your firewall** and **Scan the code**.
+   - Or choose **Type the address and code**. Enter the address shown on the page (such as `192.168.50.1`), check that the fingerprint the app shows matches the one on the page, then type the code.
+3. The phone appears in the firewall's list of linked devices. Remove it there at any time, or unlink it from the app's **Firewalls** screen.
+
+The app can link several firewalls and switch between them. **Try the demo** shows a pretend network inside the app, for looking around.
+
+> **Note:** After a change, the app checks for a few seconds that it can still reach the firewall, then keeps the change. Stay in the app until it says **Saved**. If you leave too early, the firewall undoes the change after a minute, as it does whenever it can't be sure you are not locked out.
+
+---
+
 ## Updating
 
 **From the web page.** Go to **Advanced → Palisade updates**. Press **Check now**, then **Install** when a new release is shown. Or switch on **Install new releases automatically**: the firewall then checks this repository's releases every night at about 3 o'clock and installs a new one by itself. Installing restarts Palisade for a few seconds. Your devices stay online and your settings are kept.
@@ -407,7 +425,7 @@ dotnet test tests/Palisade.Client.Tests
 
 Name the test projects as shown. A plain `dotnet test` at the top also builds the companion app, which needs the .NET MAUI workload (`dotnet workload install maui`). The client tests start the real web interface on free local ports and talk to it over HTTPS.
 
-**The companion app** (`src/Palisade.App`, in progress) needs the MAUI workload. On Windows it builds for Windows and Android. For now it runs against a demo firewall built into the app:
+**The companion app** (`src/Palisade.App`) needs the MAUI workload. On Windows it builds for Windows and Android (iOS and macOS need a Mac):
 
 ```bash
 dotnet build src/Palisade.App -f net10.0-windows10.0.19041.0

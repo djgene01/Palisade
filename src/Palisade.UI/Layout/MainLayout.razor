@@ -16,31 +16,34 @@
 
 <div class="flex min-h-dvh flex-col md:flex-row">
     <header class="border-line bg-side md:sticky md:top-0 md:flex md:h-dvh md:w-60 md:shrink-0 md:flex-col md:overflow-y-auto md:border-r">
-        <div class="px-4 py-4 md:px-5 md:pt-7">
+        <div class="px-4 py-3 md:px-5 md:py-4 md:pt-7">
             <a href="/" class="flex items-center gap-3 md:flex-col md:items-start md:gap-2">
                 @* The mark: the palisade's pointed stakes, standing inside a shield. *@
-                <svg class="h-10 w-9 shrink-0 text-brand md:h-16 md:w-14" viewBox="0 0 48 56" aria-hidden="true">
+                <svg class="h-9 w-8 shrink-0 text-brand md:h-16 md:w-14" viewBox="0 0 48 56" aria-hidden="true">
                     <path d="M24 2l20 7v17c0 14-8.5 23-20 28C12.500 49 4 40 4 26V9z" fill="var(--brand-soft)" stroke="currentColor" stroke-width="3" stroke-linejoin="round" />
                     <path d="M13 22l4-5 4 5v18h-8zM20 18l4-5 4 5v24h-8zM27 22l4-5 4 5v18h-8z" fill="currentColor" stroke="var(--brand-soft)" stroke-width="1.5" stroke-linejoin="round" />
                 </svg>
-                <span>
-                    <span class="block text-2xl font-extrabold leading-none tracking-tight text-ink">Palisade</span>
-                    <span class="mt-1 block text-sm text-muted">Home firewall</span>
+                <span class="min-w-0">
+                    <span class="block text-xl font-extrabold leading-none tracking-tight text-ink md:text-2xl">Palisade</span>
+                    <span class="mt-1 block truncate text-sm text-muted">@Shell.Subtitle()</span>
                 </span>
             </a>
         </div>
 
-        @if (Ready)
-        {
-            <nav aria-label="Main" class="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:pt-3">
-                @foreach (var (href, label, icon) in Links)
+        @* The side menu, on wide screens. Phones get the tab bar at the bottom instead. *@
+        <nav aria-label="Main" class="hidden px-3 md:flex md:flex-col md:gap-1 md:pt-3">
+            @if (Ready)
+            {
+                @foreach (var (href, label, _, icon) in Pages)
                 {
-                    <NavLink href="@href" Match="@(href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)" class="nav-link" ActiveClass="active">
-                        <Icon Name="@icon" />@label
-                    </NavLink>
+                    <NavLink href="@href" Match="@Match(href)" class="nav-link" ActiveClass="active"><Icon Name="@icon" />@label</NavLink>
                 }
-            </nav>
-        }
+            }
+            @foreach (var link in Shell.ExtraLinks)
+            {
+                <NavLink href="@link.Href" Match="NavLinkMatch.Prefix" class="nav-link" ActiveClass="active"><Icon Name="@link.Icon" />@link.Label</NavLink>
+            }
+        </nav>
 
         <div class="hidden border-t border-line px-3 py-4 md:mx-3 md:mt-4 md:block md:px-0">
             <button type="button" class="nav-link w-full cursor-pointer" @onclick="ToggleThemeAsync">
@@ -48,20 +51,35 @@
             </button>
             @if (Shell.SignOutButton is { } signOut)
             {
-                <DynamicComponent Type="signOut" Parameters="Sidebar" />
+                <DynamicComponent Type="signOut" />
             }
         </div>
     </header>
 
-    <main id="main" class="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 pb-32 pt-4 md:px-10 md:pt-8">
+    <main id="main" class="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-4 md:px-10 md:pb-32 md:pt-8">
         @if (State.Error is not null && State.Config is null)
         {
             <div role="alert" class="panel max-w-xl border-danger p-6">
-                <h1 class="text-2xl font-bold" tabindex="-1">Can't reach the firewall service</h1>
-                <p class="mt-2">The page loaded, but the part of Palisade that controls the network is not answering. Your network keeps running with the last saved rules.</p>
-                <p class="mt-2 text-muted">@State.Error</p>
-                <p class="mt-2 text-muted">On the firewall itself, <code>systemctl status palisade-agent</code> shows what went wrong.</p>
-                <button type="button" class="btn btn-primary mt-4" @onclick="State.LoadAsync">Try again</button>
+                @if (Shell.OnTheFirewall)
+                {
+                    <h1 class="text-2xl font-bold" tabindex="-1">Can't reach the firewall service</h1>
+                    <p class="mt-2">The page loaded, but the part of Palisade that controls the network is not answering. Your network keeps running with the last saved rules.</p>
+                    <p class="mt-2 text-muted">@State.Error</p>
+                    <p class="mt-2 text-muted">On the firewall itself, <code>systemctl status palisade-agent</code> shows what went wrong.</p>
+                }
+                else
+                {
+                    <h1 class="text-2xl font-bold" tabindex="-1">Can't reach the firewall</h1>
+                    <p class="mt-2">@State.Error</p>
+                    <p class="mt-2 text-muted">Your network keeps running with the last saved rules, whether this device can reach the firewall or not.</p>
+                }
+                <div class="mt-4 flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-primary" @onclick="State.LoadAsync">Try again</button>
+                    @foreach (var link in Shell.ExtraLinks)
+                    {
+                        <a href="@link.Href" class="btn btn-quiet"><Icon Name="@link.Icon" />@link.Label</a>
+                    }
+                </div>
             </div>
         }
         else if (State.Config is null)
@@ -72,16 +90,62 @@
         {
             @Body
         }
-
-        <div class="mt-12 flex flex-wrap gap-2 border-t border-line pt-4 md:hidden">
-            <button type="button" class="btn btn-quiet" @onclick="ToggleThemeAsync">@(_dark ? "Use light colours" : "Use dark colours")</button>
-            @if (Shell.SignOutButton is { } footerSignOut)
-            {
-                <DynamicComponent Type="footerSignOut" Parameters="Footer" />
-            }
-        </div>
     </main>
 </div>
+
+@* The tab bar, on phones: the pages used most, and More for the rest. *@
+<nav aria-label="Main" class="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-side pb-[env(safe-area-inset-bottom)] md:hidden">
+    <ul class="mx-auto grid max-w-lg grid-cols-4">
+        @if (Ready)
+        {
+            @foreach (var (href, _, tab, icon) in Pages.Take(TabCount))
+            {
+                <li>
+                    <NavLink href="@href" Match="@Match(href)" class="tab-link" ActiveClass="active" @onclick="() => _more = false">
+                        <Icon Name="@icon" /><span>@tab</span>
+                    </NavLink>
+                </li>
+            }
+        }
+        else
+        {
+            <li class="col-span-3"></li>
+        }
+        <li>
+            <button type="button" class="tab-link w-full @(_more || MoreIsCurrent ? "active" : "")" aria-expanded="@(_more ? "true" : "false")" aria-controls="more-menu" @onclick="() => _more = !_more">
+                <Icon Name="more" /><span>More</span>
+            </button>
+        </li>
+    </ul>
+</nav>
+
+@if (_more)
+{
+    <div class="fixed inset-0 z-30 bg-black/40 md:hidden" @onclick="() => _more = false"></div>
+    <div id="more-menu" role="menu" aria-label="More"
+         class="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-lg rounded-t-xl border border-line bg-surface p-3 shadow-xl md:hidden">
+        @if (Ready)
+        {
+            @foreach (var (href, label, _, icon) in Pages.Skip(TabCount))
+            {
+                <NavLink href="@href" Match="@Match(href)" class="nav-link" ActiveClass="active" role="menuitem" @onclick="() => _more = false"><Icon Name="@icon" />@label</NavLink>
+            }
+        }
+        @foreach (var link in Shell.ExtraLinks)
+        {
+            <NavLink href="@link.Href" Match="NavLinkMatch.Prefix" class="nav-link" ActiveClass="active" role="menuitem" @onclick="() => _more = false"><Icon Name="@link.Icon" />@link.Label</NavLink>
+        }
+        <div class="mt-2 border-t border-line pt-2">
+            <button type="button" class="nav-link w-full cursor-pointer" role="menuitem" @onclick="ToggleThemeAsync">
+                <Icon Name="@(_dark ? "sun" : "moon")" />@(_dark ? "Use light colours" : "Use dark colours")
+            </button>
+            @if (Shell.SignOutButton is { } menuSignOut)
+            {
+                <DynamicComponent Type="menuSignOut" />
+            }
+        </div>
+    </div>
+}
 
 <ApplyGuard />
 
@@ -92,18 +156,32 @@
 </div>
 
 @code {
-    private static readonly (string Href, string Label, string Icon)[] Links =
+    // Label in the side menu, shorter label on the tab bar, icon. The first ones get a tab on phones.
+    private static readonly (string Href, string Label, string Tab, string Icon)[] Pages =
     [
-        ("/", "Overview", "home"), ("/devices", "Devices", "devices"), ("/filter", "Content filter", "shield"), ("/ports", "Open ports", "ports"),
-        ("/rules", "Rules", "rules"), ("/network", "Network", "globe"), ("/advanced", "Advanced", "advanced"),
+        ("/", "Overview", "Overview", "home"), ("/devices", "Devices", "Devices", "devices"), ("/filter", "Content filter", "Filter", "shield"),
+        ("/ports", "Open ports", "Ports", "ports"), ("/rules", "Rules", "Rules", "rules"), ("/network", "Network", "Network", "globe"),
+        ("/advanced", "Advanced", "Advanced", "advanced"),
     ];
-
-    private static readonly Dictionary<string, object> Sidebar = new() { ["Sidebar"] = true };
-    private static readonly Dictionary<string, object> Footer = new() { ["Sidebar"] = false };
+    private const int TabCount = 3;
 
     private bool _dark;
+    private bool _more;
 
     private bool Ready => State.Config?.SetupComplete == true;
+
+    private static NavLinkMatch Match(string href) => href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix;
+
+    /// <summary>True when the page shown is one of those under More, so its tab looks selected.</summary>
+    private bool MoreIsCurrent
+    {
+        get
+        {
+            var path = new Uri(Nav.Uri).AbsolutePath;
+            return Pages.Skip(TabCount).Any(p => path.StartsWith(p.Href, StringComparison.Ordinal))
+                || Shell.ExtraLinks.Any(l => path.StartsWith(l.Href, StringComparison.Ordinal));
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -117,6 +195,7 @@
     {
         if (!firstRender) return;
         _dark = await JS.InvokeAsync<bool>("palisade.isDark");
+        Shell.ThemeChanged?.Invoke(_dark);
         StateHasChanged();
     }
 
@@ -126,11 +205,20 @@
         if (State.Config is { SetupComplete: false } && !onWelcome) Nav.NavigateTo("/welcome");
     }
 
-    private async Task ToggleThemeAsync() => _dark = await JS.InvokeAsync<bool>("palisade.toggleTheme");
+    private async Task ToggleThemeAsync()
+    {
+        _dark = await JS.InvokeAsync<bool>("palisade.toggleTheme");
+        Shell.ThemeChanged?.Invoke(_dark);
+    }
 
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(SendToSetupIfNeeded);
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(() =>
+    {
+        _more = false;
+        SendToSetupIfNeeded();
+        StateHasChanged();
+    });
 
     public void Dispose()
     {

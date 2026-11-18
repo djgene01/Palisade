@@ -1,0 +1,19 @@
+@inherits LayoutComponentBase
+@inject IJSRuntime JS
+
+@* For the app's own screens (linking, choosing a firewall). They must work with no firewall at all,
+   so unlike the shared frame this one loads nothing. *@
+<main id="main" class="mx-auto flex min-h-dvh max-w-lg flex-col px-4 pb-10 pt-6">
+    <div class="mb-6 flex items-center gap-3">
+        <Stakes Count="3" Class="h-8 text-brand" />
+        <span class="text-2xl font-extrabold leading-none tracking-tight text-ink">Palisade</span>
+    </div>
+    @Body
+</main>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) SystemBars.Apply(await JS.InvokeAsync<bool>("palisade.isDark"));
+    }
+}

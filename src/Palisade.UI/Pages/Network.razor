@@ -248,7 +248,7 @@
         }
         catch (Exception ex)
         {
-            (_flushOk, _flushed) = (false, $"The firewall service did not answer. ({ex.Message})");
+            (_flushOk, _flushed) = (false, Problem.Explain(ex, "The firewall service did not answer."));
         }
         _flushing = false;
     }
