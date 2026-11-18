@@ -31,6 +31,7 @@
 - [Install on Ubuntu Server](#install-on-ubuntu-server)
 - [First-time setup](#first-time-setup)
 - [The companion app](#the-companion-app)
+- [Zero Trust Mode](#zero-trust-mode)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
 - [Uninstalling](#uninstalling)
@@ -67,6 +68,7 @@
 - Devices listed with names, type icons and maker.
 - **Where to?** briefly records which sites one device connects to.
 - Pause a device, or give it off times such as school nights.
+- **Zero Trust Mode**: a new device gets nothing until you approve it, on the page or in the app. Until then it waits in a holding zone, and what it tries is recorded.
 
 **Looks after itself**
 - Updates itself from this repository's [releases](https://github.com/djgene01/Palisade/releases), at night, when you turn on automatic updates.
@@ -306,6 +308,35 @@ The app can link several firewalls and switch between them. **Try the demo** sho
 
 ---
 
+## Zero Trust Mode
+
+With Zero Trust Mode on, a device that joins your network gets nothing until you approve it: not the internet, not your other devices, not the firewall's page. Switch it on under **Network → Zero Trust Mode**.
+
+**Switching it on.** Every device the firewall knows about right now is approved straight away, so nobody in the house loses the internet. That covers devices with a fixed address or a name you gave them, devices with an address from the firewall, and any device it has heard from in the last few minutes. Devices that are switched off or quiet, such as a camera or a printer, are not covered. When they next connect, they wait for approval like a new device.
+
+**When a device joins.** It gets an address in the *holding zone* (`10.99.0.0/24` unless you choose another range), with no gateway and no DNS server. The firewall drops everything it sends and records it:
+
+- The **Devices** page and the app list each waiting device with its maker, when it was first and last seen, and the places it tried to reach, such as *Secure web (HTTPS)* to a given address.
+- The Overview's **Needs your attention** and a count on the **Devices** link show that something is waiting.
+- The packets themselves are kept on the firewall (up to 20 MB, readable only by root). Download them from the Devices page as a `.zip` and open them in Wireshark. They are deleted when you switch the mode off.
+
+**Approve or block.** **Approve** lets the device in at once, under a name you choose. It moves onto your home network when it next asks for an address, which a phone or laptop does within a minute or two (or reconnect it to the Wi-Fi). **Block** gives it no address at all. Blocked devices are listed under **Blocked devices**, where **Unblock** puts them back on the waiting list. To take an approval away, choose the device on the Devices page and press **Remove approval**. Like every change, that waits 60 seconds for your confirmation.
+
+**What it can't do:**
+
+- It controls everything that passes **through** the firewall. Two devices on the same switch or Wi-Fi can still talk to each other directly. A waiting device that sets an address by hand could reach a device next to it. Put devices you don't trust on a separate Wi-Fi network where you can.
+- A device is recognised by its hardware (MAC) address. That can be copied. A phone that uses a *private Wi-Fi address* turns up as a new device whenever it changes that address. Switch that off on the phone for your home Wi-Fi, or approve it again.
+- Notifications appear on the page and in the app while it is open. There is no push notification yet.
+
+**Switching it off** lets every device in again, waiting ones included. Your approvals and blocks are kept for when you switch it back on. If you are locked out of the page, switch it off from the firewall's own keyboard. As root (put `sudo` in front of each on Ubuntu), run both commands within 60 seconds of each other:
+
+```bash
+curl -s --unix-socket /run/palisade/agent.sock -H 'Content-Type: application/json' -d '{"enabled":false}' http://agent/zerotrust
+curl -s --unix-socket /run/palisade/agent.sock -X POST http://agent/config/confirm
+```
+
+---
+
 ## Updating
 
 **From the web page.** Go to **Advanced → Palisade updates**. Press **Check now**, then **Install** when a new release is shown. Or switch on **Install new releases automatically**: the firewall then checks this repository's releases every night at about 3 o'clock and installs a new one by itself. Installing restarts Palisade for a few seconds. Your devices stay online and your settings are kept.
@@ -354,6 +385,8 @@ systemctl restart palisade-web
 ```
 
 **I locked myself out.** Changes that cut you off are undone after 60 seconds. If you are still locked out, use the machine's own keyboard and screen. Palisade's rules always allow the web page (8080) and SSH (22) from the home network port. Plug a computer in there.
+
+**A device gets an address like 10.99.0.x and no internet.** Zero Trust Mode is on and the device is waiting for approval. Approve it on the **Devices** page or in the app.
 
 **Devices get no address.** Check that the home network port is the one plugged into your switch (**Network → Which port is which**). Also check that no other device on that network hands out addresses, such as an ISP router in router mode or a mesh system that is not in access-point mode.
 
@@ -413,6 +446,8 @@ Every change follows the same path:
 | `/etc/dnsmasq.d/palisade.conf`, `/etc/palisade/dns/` | DHCP and DNS settings |
 | `/etc/network/interfaces.d/palisade-*` | Home network port, and the internet port or Wi-Fi when Palisade looks after them |
 | `/etc/sysctl.d/90-palisade.conf` | Turns on packet forwarding |
+| `/etc/palisade/zt-hosts` | Zero Trust Mode: the approved and blocked devices, for DHCP |
+| `/var/lib/palisade/capture/` | Zero Trust Mode: packets from waiting devices (root only, deleted when the mode is switched off) |
 
 **Content filtering** uses free public filtering DNS services: Cloudflare for Families for *Security* and *Adult*, and CleanBrowsing's family filter for *Family*. When filtering is on, devices' DNS lookups are sent through the firewall, so a device can't pick its own DNS server. Filtering works on site names. It does not inspect traffic, and it can't block something inside an app that is already allowed.
 

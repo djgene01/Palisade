@@ -27,6 +27,21 @@ public sealed class SimulatedPlatform : ISystemPlatform
 
     public Task SetAccessAsync(IReadOnlyList<DeviceAccess> access, CancellationToken ct) => Task.CompletedTask;
 
+    /// <summary>A phone nobody has approved, which turns up in the demo once Zero Trust is on.</summary>
+    public const string StrangerMac = "52:54:00:bb:00:66";
+
+    public Task SetApprovalsAsync(FirewallConfig live, CancellationToken ct)
+    {
+        if (_applied is not null) _applied.ZeroTrust = live.Clone().ZeroTrust;
+        return Task.CompletedTask;
+    }
+
+    // The demo's own devices all come in through leases, so there is nothing extra to hear about.
+    public Task<IReadOnlyList<string>> GetNeighboursAsync(FirewallConfig live, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
+
+    private static bool StrangerWaiting(FirewallConfig c) =>
+        c.ZeroTrust.Enabled && c.ZeroTrust.Approved.All(d => d.Mac != StrangerMac) && c.ZeroTrust.Blocked.All(d => d.Mac != StrangerMac);
+
     public Task<WifiStatus> GetWifiAsync(CancellationToken ct) =>
         Task.FromResult(new WifiStatus { Interface = "wlp3s0", Ssid = _wifi, Connected = true, Address = "10.0.0.88" });
 
@@ -59,6 +74,20 @@ public sealed class SimulatedPlatform : ISystemPlatform
             Hostname = "palisade-demo",
             // The demo's unnamed device plays the part of a box that carries relay software.
             RelayDevices = active.Filter.BlockRelays ? [new RelaySighting { Mac = "52:54:00:aa:00:04", Attempts = 212, LastSeen = now.AddMinutes(-3) }] : [],
+            // With Zero Trust on, the stranger sits in the holding zone, knocking on a few doors.
+            HeldDevices = StrangerWaiting(active)
+                ? [new HeldDevice
+                {
+                    Mac = StrangerMac, Address = ZeroTrustPlan.HoldingPool(active.ZeroTrust).First.ToString(), Hostname = "android-7f3a",
+                    FirstSeen = _started.AddMinutes(-2), LastSeen = now.AddSeconds(-20), Attempts = 47,
+                    Flows =
+                    [
+                        new HeldFlow { Address = active.ZeroTrust.HoldingAddress, Protocol = "udp", Port = 53, Packets = 31, LastSeen = now.AddSeconds(-20) },
+                        new HeldFlow { Address = "142.250.180.4", Protocol = "tcp", Port = 443, Packets = 12, LastSeen = now.AddMinutes(-1) },
+                        new HeldFlow { Address = "3.120.181.40", Protocol = "tcp", Port = 8883, Packets = 4, LastSeen = now.AddMinutes(-2) },
+                    ],
+                }]
+                : [],
             UptimeSeconds = (long)(now - _started).TotalSeconds,
             Simulated = true,
             FirewallActive = _applied is not null,
@@ -105,6 +134,11 @@ public sealed class SimulatedPlatform : ISystemPlatform
             var reserved = config.Dhcp.Reservations.FirstOrDefault(r => r.Mac == mac);
             return new DhcpLease(expires, mac, reserved?.Address ?? new Ip4(start.Value + (uint)i).ToString(), name);
         }).ToList();
+        // The stranger: in the holding zone while it waits, on the home network once it is approved.
+        if (StrangerWaiting(config))
+            leases.Add(new DhcpLease(DateTimeOffset.UtcNow.AddMinutes(2), StrangerMac, ZeroTrustPlan.HoldingPool(config.ZeroTrust).First.ToString(), "android-7f3a"));
+        else if (config.ZeroTrust.Enabled && config.ZeroTrust.Approved.Any(d => d.Mac == StrangerMac))
+            leases.Add(new DhcpLease(expires, StrangerMac, new Ip4(start.Value + 20).ToString(), "android-7f3a"));
         return Task.FromResult<IReadOnlyList<DhcpLease>>(leases);
     }
 }

@@ -1,0 +1,158 @@
+@inherits StatePage
+@using System.Globalization
+@inject ShellOptions Shell
+
+@* Zero Trust Mode on the Devices page: who is waiting, what each one tried, and the decision. *@
+@if (Config.ZeroTrust.Enabled)
+{
+    var waiting = State.Waiting;
+    var blocked = Config.ZeroTrust.Blocked;
+    <section aria-labelledby="waiting-title" class="mt-6 max-w-4xl">
+        @if (waiting.Count == 0)
+        {
+            <p class="panel flex items-center gap-2 p-4 text-muted"><Icon Name="shield-check" Class="text-ok" /><span><span class="font-semibold text-ink" id="waiting-title">Zero Trust Mode is on.</span> No device is waiting for approval.</span></p>
+        }
+        else
+        {
+            <div class="panel border-warn p-4">
+                <h2 id="waiting-title" class="flex items-center gap-2 text-xl font-bold"><Icon Name="bell" Class="text-warn" />Waiting for approval (@waiting.Count)</h2>
+                <p class="mt-1 text-muted">These devices joined your network and can reach nothing until you decide. Approve the ones you know; block the rest.</p>
+                <Problems Issues="Issues" />
+
+                <ul class="mt-4 space-y-4" aria-label="Devices waiting for approval">
+                    @foreach (var device in waiting)
+                    {
+                        var maker = State.MakerOf(device.Mac);
+                        var title = Title(device, maker);
+                        <li class="rounded-lg border border-line bg-surface p-4">
+                            <div class="flex flex-wrap items-start gap-3">
+                                <Icon Name="unknown" Class="mt-1 h-6 w-6 text-muted" />
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-lg font-bold break-words">@title</p>
+                                    <p class="text-sm text-muted">
+                                        <span class="font-mono">@device.Mac</span>@(Maker.IsMadeUp(device.Mac) ? " (a private address the device made up)" : maker.Length > 0 ? $" · {maker}" : "")
+                                        · @(device.Address.Length > 0 ? $"held at {device.Address}" : "no address from the firewall: one set by hand, or none yet")
+                                    </p>
+                                    <p class="text-sm text-muted">First seen @When(device.FirstSeen) · last @When(device.LastSeen) · @Fmt.Plural((int)Math.Min(device.Attempts, int.MaxValue), "attempt turned away", "attempts turned away")</p>
+                                </div>
+                            </div>
+
+                            @if (device.Flows.Count > 0)
+                            {
+                                <details class="mt-3">
+                                    <summary class="cursor-pointer font-semibold">What it tried to reach (@Fmt.Plural(device.Flows.Count, "place", "places"))</summary>
+                                    <div class="mt-2 overflow-x-auto">
+                                        <table class="w-full text-left text-sm">
+                                            <thead class="text-muted"><tr><th class="py-1 pr-3 font-semibold">Where</th><th class="py-1 pr-3 font-semibold">What</th><th class="py-1 pr-3 text-right font-semibold">Tries</th><th class="py-1 font-semibold">Last</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var flow in device.Flows)
+                                                {
+                                                    <tr class="border-t border-line">
+                                                        <td class="py-1 pr-3 font-mono">@(flow.Address == Config.ZeroTrust.HoldingAddress ? "this firewall" : flow.Address)</td>
+                                                        <td class="py-1 pr-3">@Service(flow)</td>
+                                                        <td class="py-1 pr-3 text-right">@flow.Packets.ToString("N0", CultureInfo.InvariantCulture)</td>
+                                                        <td class="py-1">@When(flow.LastSeen)</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </details>
+                            }
+
+                            <div class="mt-4 flex flex-wrap items-end gap-2">
+                                <div class="min-w-0 flex-1 basis-48">
+                                    <label for="name-@device.Mac" class="field-label">Name</label>
+                                    <input id="name-@device.Mac" class="input" maxlength="40" value="@NameFor(device, maker)" @onchange="e => Typed(device.Mac, e)" />
+                                </div>
+                                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="() => DecideAsync(ApprovalAction.Approve, device, maker)"><Icon Name="shield-check" />Approve</button>
+                                <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="() => DecideAsync(ApprovalAction.Block, device, maker)">Block</button>
+                            </div>
+                        </li>
+                    }
+                </ul>
+
+            </div>
+        }
+
+        @* Kept after the last decision too: what a device sent before it was approved or blocked is often the interesting part. *@
+        @if (Shell.CaptureDownloadUrl is { } url)
+        {
+            <p class="mt-3 text-sm"><a class="font-semibold text-brand underline underline-offset-4" href="@url" download>Download what waiting devices sent</a> <span class="text-muted">(a .zip of captures to open in Wireshark; deleted when Zero Trust Mode is switched off)</span></p>
+        }
+
+        @if (blocked.Count > 0)
+        {
+            <details class="mt-3">
+                <summary class="cursor-pointer font-semibold">Blocked devices (@blocked.Count)</summary>
+                <ul class="mt-2 divide-y divide-line rounded-lg border border-line" aria-label="Blocked devices">
+                    @foreach (var device in blocked.OrderByDescending(b => b.BlockedAt))
+                    {
+                        <li class="flex flex-wrap items-center justify-between gap-2 p-3">
+                            <span><span class="font-semibold">@(device.Name.Length > 0 ? device.Name : "Unnamed device")</span> <span class="font-mono text-sm text-muted">@device.Mac</span> <span class="text-sm text-muted">· blocked @When(device.BlockedAt)</span></span>
+                            <button type="button" class="btn btn-quiet" disabled="@_busy" @onclick="() => UnblockAsync(device.Mac)">Unblock</button>
+                        </li>
+                    }
+                </ul>
+                <p class="mt-1 text-sm text-muted">A blocked device gets no address at all. Unblocking puts it back on the waiting list.</p>
+            </details>
+        }
+    </section>
+}
+
+@code {
+    private bool _busy;
+    private readonly Dictionary<string, string> _names = [];
+
+    private void Typed(string mac, ChangeEventArgs e) => _names[mac] = e.Value?.ToString() ?? "";
+
+    private static string Title(HeldDevice d, string maker) =>
+        d.Hostname.Length > 0 ? d.Hostname : maker.Length > 0 ? $"{maker} device" : "Unknown device";
+
+    // The name given on approval: what the owner typed, else what the device called itself, made safe.
+    private string NameFor(HeldDevice d, string maker)
+    {
+        if (_names.TryGetValue(d.Mac, out var typed)) return typed;
+        var own = System.Text.RegularExpressions.Regex.Replace(d.Hostname.Length > 0 ? d.Hostname : maker, @"[^A-Za-z0-9 _.,()\-]+", " ").Trim();
+        return own.Length > 40 ? own[..40].Trim() : own;
+    }
+
+    private async Task DecideAsync(ApprovalAction action, HeldDevice device, string maker)
+    {
+        _busy = true;
+        Issues = await State.ChangeApprovalAsync(action, device.Mac, NameFor(device, maker));
+        if (Issues.Count == 0) _names.Remove(device.Mac);
+        _busy = false;
+    }
+
+    private async Task UnblockAsync(string mac)
+    {
+        _busy = true;
+        Issues = await State.ChangeApprovalAsync(ApprovalAction.Unblock, mac);
+        _busy = false;
+    }
+
+    private static string When(DateTimeOffset time)
+    {
+        var local = time.ToLocalTime();
+        return local.Date == DateTime.Today ? local.ToString("HH:mm", CultureInfo.InvariantCulture) : local.ToString("d MMM HH:mm", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>A port in words, for the ones a household is likely to meet.</summary>
+    private static string Service(HeldFlow f) => (f.Protocol, f.Port) switch
+    {
+        (_, 53) => "Name lookup (DNS)",
+        ("udp", 67) => "Asking for an address",
+        ("udp", 123) => "Setting its clock (NTP)",
+        ("tcp", 80) => "Web, unencrypted (HTTP)",
+        ("tcp", 443) or ("udp", 443) => "Secure web (HTTPS)",
+        ("tcp", 853) => "Encrypted name lookup",
+        ("tcp", 22) => "Remote login (SSH)",
+        ("tcp", 23) or ("tcp", 2323) => "Old remote login (Telnet)",
+        ("tcp", 1883) or ("tcp", 8883) => "Cloud messaging (MQTT)",
+        ("udp", 5353) => "Looking for devices nearby (mDNS)",
+        ("udp", 1900) => "Looking for devices nearby (UPnP)",
+        ("tcp", 8080) or ("tcp", 8081) or ("tcp", 8443) => "This firewall's pages",
+        _ => $"{f.Protocol.ToUpperInvariant()} port {f.Port.ToString(CultureInfo.InvariantCulture)}",
+    };
+}

@@ -53,6 +53,17 @@ public static class ConfigRenderer
         L("table inet palisade {");
         // Filled by the agent from the clock: devices that are paused or inside one of their off times.
         L($"    set {AccessPlan.PausedSet} {{ type ether_addr; }}");
+        var zt = c.ZeroTrust;
+        if (zt.Enabled)
+        {
+            // Written out in full, so the rules loaded at boot (before the agent runs) already let the approved devices in.
+            L($"    set {ZeroTrustPlan.ApprovedSet} {{");
+            L("        type ether_addr;");
+            if (zt.Approved.Count > 0) L($"        elements = {{ {string.Join(", ", zt.Approved.Select(d => Mac(d.Mac)))} }}");
+            L("    }");
+            // What waiting devices try, counted per destination. Full or not, it only ever records: the drop is its own line.
+            L($"    set {ZeroTrustPlan.FlowsSet} {{ type ether_addr . ipv4_addr . inet_proto . inet_service; size 4096; flags dynamic,timeout; timeout 7d; counter; }}");
+        }
         if (c.Filter.BlockRelays)
             L($"    set {RelayPlan.SeenSet} {{ type ether_addr; size 1024; flags dynamic; counter; }}");
         // Filled by the name server as a limited device looks its allowed sites up.
@@ -62,6 +73,12 @@ public static class ConfigRenderer
         L("    chain input {");
         L("        type filter hook input priority filter; policy drop;");
         L("        iif \"lo\" accept");
+        if (zt.Enabled)
+        {
+            // A waiting device may ask for an address and nothing else: not names, not ping, not this firewall's pages.
+            L($"        iifname {lan} ether saddr != @{ZeroTrustPlan.ApprovedSet} udp sport 68 udp dport 67 accept comment \"address requests from devices waiting for approval\"");
+            HeldLines(lan, L);
+        }
         L("        ct state established,related accept");
         L("        ct state invalid drop");
         L("        meta l4proto { icmp, ipv6-icmp } accept");
@@ -78,6 +95,11 @@ public static class ConfigRenderer
         L();
         L("    chain forward {");
         L("        type filter hook forward priority filter; policy drop;");
+        if (zt.Enabled)
+        {
+            HeldLines(lan, L);
+            L($"        ip daddr {ZeroTrustPlan.HoldingRange(zt)} counter drop comment \"nothing reaches the holding zone\"");
+        }
         // Ahead of the "established" line on purpose: a pause must also stop a video that is already playing.
         L($"        iifname {lan} ether saddr @{AccessPlan.PausedSet} counter reject with icmpx type admin-prohibited comment \"paused or in an off time\"");
         if (c.Filter.BlockRelays)
@@ -161,6 +183,18 @@ public static class ConfigRenderer
         L("    }");
         L("}");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Count, capture, then drop, as three lines: a full counting set ends its own line, so the drop must never
+    /// share one with it. The drop matches every protocol, IPv6 included.
+    /// </summary>
+    private static void HeldLines(string lan, Action<string> L)
+    {
+        var notApproved = $"iifname {lan} ether saddr != @{ZeroTrustPlan.ApprovedSet}";
+        L($"        {notApproved} meta l4proto {{ tcp, udp }} update @{ZeroTrustPlan.FlowsSet} {{ ether saddr . ip daddr . meta l4proto . th dport }}");
+        L($"        {notApproved} limit rate 100/second log group {ZeroTrustPlan.LogGroup.ToString(CultureInfo.InvariantCulture)}");
+        L($"        {notApproved} counter drop comment \"waiting for approval\"");
     }
 
     private static string RuleLine(FirewallRule r, string wan, string lan)
@@ -252,7 +286,25 @@ public static class ConfigRenderer
         L($"interface={Token(c.LanInterface)}");
         L("bind-dynamic");
         LookupLines(c, c.Filter.Level, L);
-        if (d.Enabled)
+        if (d.Enabled && c.ZeroTrust.Enabled)
+        {
+            // Approved devices are "known" (from the hosts file) and get a home address; everything else gets a
+            // short lease in the holding zone with no way out. A reservation also counts as known, so only
+            // approved devices keep theirs.
+            var zt = c.ZeroTrust;
+            var (first, last) = ZeroTrustPlan.HoldingPool(zt);
+            L("dhcp-authoritative");
+            L($"dhcp-hostsfile={ZeroTrustPlan.HostsFile}");
+            L($"dhcp-range=tag:known,{Address(d.RangeStart)},{Address(d.RangeEnd)},{Ip4.MaskString(c.LanPrefix)},{d.LeaseHours.ToString(CultureInfo.InvariantCulture)}h");
+            L($"dhcp-range=set:holding,tag:!known,{first},{last},{Ip4.MaskString(zt.HoldingPrefix)},{ZeroTrustPlan.HoldingLease}");
+            L($"dhcp-option=tag:!holding,option:router,{Address(c.LanAddress)}");
+            L($"dhcp-option=tag:!holding,option:dns-server,{Address(c.LanAddress)}");
+            L("dhcp-option=tag:holding,option:router");
+            L("dhcp-option=tag:holding,option:dns-server");
+            foreach (var r in d.Reservations.Where(r => zt.Approved.Any(a => a.Mac == r.Mac)))
+                L($"dhcp-host={Token(r.Mac)},{Address(r.Address)},{Token(r.Name)}");
+        }
+        else if (d.Enabled)
         {
             L("dhcp-authoritative");
             L($"dhcp-range={Address(d.RangeStart)},{Address(d.RangeEnd)},{Ip4.MaskString(c.LanPrefix)},{d.LeaseHours.ToString(CultureInfo.InvariantCulture)}h");
@@ -268,10 +320,11 @@ public static class ConfigRenderer
         $"{Header}\nauto {Token(c.LanInterface)}\niface {Token(c.LanInterface)} inet static\n    address {LanAddresses(c)[0]}\n"
         + string.Concat(LanAddresses(c).Skip(1).Select(a => $"    up ip addr add {a} dev {Token(c.LanInterface)}\n"));
 
-    /// <summary>Every address the home network port carries: the firewall's own first, then one per extra network.</summary>
+    /// <summary>Every address the home network port carries: the firewall's own first, then one per extra network, then the holding zone's.</summary>
     public static IReadOnlyList<string> LanAddresses(FirewallConfig c) =>
         [$"{Address(c.LanAddress)}/{c.LanPrefix.ToString(CultureInfo.InvariantCulture)}",
-         .. c.ExtraNetworks.Select(n => $"{Address(n.Address)}/{(n.Prefix is >= 16 and <= 30 ? n.Prefix : throw new InvalidOperationException("Unsafe network size in config.")).ToString(CultureInfo.InvariantCulture)}")];
+         .. c.ExtraNetworks.Select(n => $"{Address(n.Address)}/{(n.Prefix is >= 16 and <= 30 ? n.Prefix : throw new InvalidOperationException("Unsafe network size in config.")).ToString(CultureInfo.InvariantCulture)}"),
+         .. c.ZeroTrust.Enabled ? [$"{Address(c.ZeroTrust.HoldingAddress)}/{ZeroTrustPlan.HoldingRange(c.ZeroTrust).Split('/')[1]}"] : Array.Empty<string>()];
 
     // The validator already rejects unsafe input. These re-check at the point of output so a
     // config that skipped validation can never smuggle syntax into a root-owned file.

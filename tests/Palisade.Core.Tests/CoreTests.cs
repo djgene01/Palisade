@@ -826,6 +826,14 @@ public class EngineTests
             Log.Add($"access:{string.Join(",", access.Where(a => a.Paused).Select(a => a.Mac))}");
             return Task.CompletedTask;
         }
+
+        public Task SetApprovalsAsync(FirewallConfig live, CancellationToken ct)
+        {
+            Log.Add($"approvals:{string.Join(",", live.ZeroTrust.Approved.Select(a => a.Mac))}");
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<string>> GetNeighboursAsync(FirewallConfig live, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
     }
 
     private static FirewallConfig Config(string lan = "192.168.50.1") => new() { WanInterface = "wan0", LanInterface = "lan0", LanAddress = lan };

@@ -1,0 +1,17 @@
+[Unit]
+Description=Palisade capture of packets from devices waiting for approval (Zero Trust Mode)
+After=nftables.service
+
+[Service]
+Type=simple
+# Exactly the packets the firewall turned away from devices waiting for approval: the "waiting" drop rule
+# copies them to log group 7. Five files of 4 MB at most, overwritten in turn, readable by root only.
+# The agent starts this only while Zero Trust Mode is on, and deletes the files when it is switched off.
+ExecStartPre=/usr/bin/install -d -m 0700 -o root -g root /var/lib/palisade/capture
+ExecStart=/usr/bin/tcpdump -i nflog:7 -n -U -s 0 -C 4 -W 5 -Z root -w /var/lib/palisade/capture/held.pcap
+UMask=0077
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

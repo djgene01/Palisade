@@ -178,6 +178,7 @@ public static partial class ConfigValidator
         issues.AddRange(LimitPlan.Validate(c.Limits));
         issues.AddRange(AccessPlan.Validate(c.Access));
         issues.AddRange(DeviceName.Validate(c.Names));
+        issues.AddRange(ZeroTrustPlan.Validate(c));
         return issues;
     }
 

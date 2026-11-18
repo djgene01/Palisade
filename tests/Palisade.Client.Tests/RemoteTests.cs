@@ -143,6 +143,39 @@ public sealed class RemoteTests : IDisposable
     }
 
     [Fact]
+    public async Task Zero_trust_is_switched_on_and_a_waiting_device_approved_through_the_app_connection()
+    {
+        var link = await _firewall.LinkAsync();
+        using var backend = new RemoteBackend(link);
+        var state = new FirewallState(backend, new RemoteMakers(backend));
+        await state.LoadAsync();
+        await state.SaveAsync(c =>
+        {
+            c.WanInterface = state.Status!.Interfaces[0].Name;
+            c.LanInterface = state.Status.Interfaces[1].Name;
+        });
+        await state.ConfirmAsync();
+
+        Assert.Empty(await state.SetZeroTrustAsync(new ZeroTrustRequest { Enabled = true, HoldingAddress = "10.99.0.1", HoldingPrefix = 24 }));
+        await state.ConfirmAsync();
+        await state.LoadAsync();
+        Assert.True(state.Config!.ZeroTrust.Enabled);
+        Assert.NotEmpty(state.Config.ZeroTrust.Approved);
+        var stranger = Assert.Single(state.Waiting);
+
+        // Approving takes effect at once: nothing waits for confirmation.
+        Assert.Empty(await state.ChangeApprovalAsync(ApprovalAction.Approve, stranger.Mac, "Visitor phone"));
+        await state.LoadAsync();
+        Assert.Null(state.Status!.PendingSecondsLeft);
+        Assert.Empty(state.Waiting);
+        Assert.Contains(state.Config!.ZeroTrust.Approved, a => a.Mac == stranger.Mac && a.Name == "Visitor phone");
+
+        // A bad address is refused with the firewall's own words.
+        var refused = await state.SetZeroTrustAsync(new ZeroTrustRequest { Enabled = true, HoldingAddress = "8.8.8.8", HoldingPrefix = 24 });
+        Assert.NotEmpty(refused);
+    }
+
+    [Fact]
     public async Task Every_other_call_the_pages_make_works_through_the_app_connection()
     {
         using var backend = new RemoteBackend(await _firewall.LinkAsync());
@@ -245,6 +278,8 @@ public sealed class RemoteTests : IDisposable
         public Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default) => Current.SetNamesAsync(names, ct);
         public Task<WifiStatus> GetWifiAsync(CancellationToken ct = default) => Current.GetWifiAsync(ct);
         public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default) => Current.SetWifiAsync(request, ct);
+        public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => Current.SetZeroTrustAsync(request, ct);
+        public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => Current.ChangeApprovalAsync(change, ct);
     }
 
     [Fact]

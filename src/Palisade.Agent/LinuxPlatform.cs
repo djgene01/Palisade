@@ -7,7 +7,7 @@ namespace Palisade.Agent;
 
 /// <summary>Applies generated files to a Debian system. Runs as root; nothing else in the product does.</summary>
 [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch, IDnsControl
+public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch, IDnsControl, IHeldCapture
 {
     public async Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default)
     {
@@ -40,6 +40,87 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
             logger.LogWarning("Could not read which devices tried a connection-sharing service: {Message}", ex.Message);
             _relays ??= new RelayTracker();
         }
+    }
+
+    /// <summary>Adds what waiting devices tried since the last look. Called from the usage loop, every 15 seconds.</summary>
+    private async Task NoteHeldAsync(CancellationToken ct)
+    {
+        if (_live is not { ZeroTrust.Enabled: true } live) return;
+        try
+        {
+            _held ??= new HeldTracker(File.Exists(HeldFile)
+                ? System.Text.Json.JsonSerializer.Deserialize<List<HeldDevice>>(await File.ReadAllTextAsync(HeldFile, ct), PalisadeJson.Options) : null);
+            var seen = await RunAsync("nft", ["-j", "list", "set", "inet", "palisade", ZeroTrustPlan.FlowsSet], ct);
+            var flows = seen.ExitCode == 0 ? ZeroTrustPlan.ParseFlows(seen.Output) : [];
+            var holding = (await GetLeasesAsync(ct)).Where(l => ZeroTrustPlan.InHoldingZone(live.ZeroTrust, l.Address));
+            if (_held.Record(DateTimeOffset.UtcNow, flows, holding, live.ZeroTrust))
+                await WriteAtomicAsync(HeldFile, System.Text.Json.JsonSerializer.Serialize(_held.Report(), PalisadeJson.Options), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Could not read what waiting devices tried: {Message}", ex.Message);
+            _held ??= new HeldTracker();
+        }
+    }
+
+    public async Task SetApprovalsAsync(FirewallConfig live, CancellationToken ct)
+    {
+        _live = live.Clone();
+        if (!live.ZeroTrust.Enabled) return;
+        // The address server first: the hosts file decides who gets a home address on the next request.
+        await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(live.ZeroTrust), ct);
+        // The kernel's set in one step, without reloading the rules (which would empty other live lists).
+        var path = Path.Combine(dataDirectory, "approved.nft");
+        await File.WriteAllTextAsync(path, ZeroTrustPlan.SetScript(live.ZeroTrust), ct);
+        await MustRunAsync("nft", ["-f", path], ct);
+        // And the rules loaded at boot, so a restart before the agent runs lets the same devices in.
+        await WriteAtomicAsync(NftablesConf, ConfigRenderer.Nftables(live), ct);
+        await RunAsync("pkill", ["-HUP", "-x", "dnsmasq"], ct);
+    }
+
+    public async Task<IReadOnlyList<string>> GetNeighboursAsync(FirewallConfig live, CancellationToken ct)
+    {
+        var result = await RunAsync("ip", ["-j", "neigh", "show", "dev", live.LanInterface], ct);
+        if (result.ExitCode != 0) return [];
+        var macs = new List<string>();
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(result.Output);
+            foreach (var n in doc.RootElement.EnumerateArray())
+            {
+                if (!n.TryGetProperty("lladdr", out var ll) || !ConfigValidator.TryNormalizeMac(ll.GetString(), out var mac)) continue;
+                var failed = n.TryGetProperty("state", out var state) && state.EnumerateArray().Any(s => s.GetString() is "FAILED" or "INCOMPLETE");
+                if (!failed) macs.Add(mac);
+            }
+        }
+        catch (System.Text.Json.JsonException) { }
+        return [.. macs.Distinct()];
+    }
+
+    /// <summary>Starts the capture of what waiting devices send, or stops it and deletes what it held.</summary>
+    private async Task SetCaptureAsync(bool on, CancellationToken ct)
+    {
+        var result = await RunAsync("systemctl", on ? ["enable", "--now", CaptureUnit] : ["disable", "--now", CaptureUnit], ct);
+        if (on && result.ExitCode != 0) logger.LogWarning("The capture of waiting devices did not start: {Error}", result.Error.Trim());
+        if (!on && Directory.Exists(CaptureDirectory))
+            foreach (var file in Directory.GetFiles(CaptureDirectory)) File.Delete(file);
+    }
+
+    public async Task<byte[]?> GetHeldCaptureAsync(CancellationToken ct = default)
+    {
+        if (!Directory.Exists(CaptureDirectory)) return null;
+        var files = Directory.GetFiles(CaptureDirectory, "held.pcap*").Where(f => new FileInfo(f).Length > 24).Order().ToList();
+        if (files.Count == 0) return null;
+        using var zip = new MemoryStream();
+        using (var archive = new System.IO.Compression.ZipArchive(zip, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+            foreach (var file in files)
+            {
+                // tcpdump is still writing the newest one, so it is read alongside it.
+                await using var source = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                await using var entry = archive.CreateEntry(Path.GetFileName(file) + (file.EndsWith(".pcap", StringComparison.Ordinal) ? "" : ".pcap")).Open();
+                await source.CopyToAsync(entry, ct);
+            }
+        return zip.ToArray();
     }
 
     public async Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default)
@@ -107,6 +188,14 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     private const string InterfacesFile = "/etc/network/interfaces";
     private const string WanInterfaceConf = "/etc/network/interfaces.d/palisade-wan";
     private const string WifiInterfaceConf = "/etc/network/interfaces.d/palisade-wifi";
+    // Packets from waiting devices: root only, at most five files of 4 MB, deleted when Zero Trust is switched off.
+    private const string CaptureDirectory = "/var/lib/palisade/capture";
+    private const string CaptureUnit = "palisade-capture.service";
+
+    // The config in force right now, as last applied: Zero Trust's lists and holding zone are read from it.
+    private FirewallConfig? _live;
+    private HeldTracker? _held;
+    private string HeldFile => Path.Combine(dataDirectory, "held.json");
 
     private readonly SemaphoreSlim _wifiGate = new(1, 1);
 
@@ -159,6 +248,8 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
 
         var nftCheck = await RunAsync("nft", ["-c", "-f", nft], ct);
         if (nftCheck.ExitCode != 0) problems.Add($"The firewall rules were rejected: {nftCheck.Error.Trim()}");
+        // The test reads the hosts file the settings point at, so it has to exist first.
+        if (config.ZeroTrust.Enabled) await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(config.ZeroTrust), ct);
         var dnsmasqCheck = await RunAsync("dnsmasq", ["--test", $"--conf-file={dnsmasq}"], ct);
         if (dnsmasqCheck.ExitCode != 0) problems.Add($"The DHCP settings were rejected: {dnsmasqCheck.Error.Trim()}");
         foreach (var instance in files.DnsInstances)
@@ -173,6 +264,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
 
     public async Task ApplyAsync(FirewallConfig config, GeneratedFiles files, CancellationToken ct)
     {
+        _live = config.Clone();
         await WriteAtomicAsync(SysctlConf, files.Sysctl, ct);
         await MustRunAsync("sysctl", ["-q", "-p", SysctlConf], ct);
 
@@ -190,6 +282,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         }
 
         // The name servers start before the rules that point devices at them, so no lookup is sent to a port nobody answers yet.
+        if (config.ZeroTrust.Enabled) await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(config.ZeroTrust), ct);
         await WriteAtomicAsync(DnsmasqConf, files.Dnsmasq, ct);
         await MustRunAsync("systemctl", ["enable", "dnsmasq"], ct);
         await MustRunAsync("systemctl", ["restart", "dnsmasq"], ct);
@@ -225,6 +318,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         }
         // Loading the rules emptied the set of paused devices, so fill it again straight away.
         await SetAccessAsync(config.Access, forget: true, ct);
+        await SetCaptureAsync(config.ZeroTrust.Enabled, ct);
 
         // The browser's reachability check cannot notice dead name lookups, and to a household those look
         // like "the internet is down". Failing here makes the engine put the previous settings back.
@@ -279,6 +373,8 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         await RunAsync("nft", ["flush", "ruleset"], ct);
         File.Delete(DnsmasqConf);
         await RunAsync("systemctl", ["disable", "--now", "dnsmasq"], ct);
+        await SetCaptureAsync(false, ct);
+        _live = null;
         foreach (var level in FilterPlan.AllLevels) await StopInstanceAsync(level, ct);
     }
 
@@ -317,6 +413,11 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         status.DhcpRunning = (await RunAsync("systemctl", ["is-active", "--quiet", "dnsmasq"], ct)).ExitCode == 0;
         status.InternetReachable = await CheckInternetAsync(active, ct);
         status.RelayDevices = _relays?.Report() ?? [];
+        // Decided devices drop out at once, without waiting for the next reading.
+        var z = active.ZeroTrust;
+        status.HeldDevices = z.Enabled
+            ? [.. (_held?.Report() ?? []).Where(h => z.Approved.All(a => a.Mac != h.Mac) && z.Blocked.All(b => b.Mac != h.Mac))]
+            : [];
         return status;
     }
 
@@ -339,6 +440,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
             {
                 await GetUsageAsync(ct);
                 await NoteRelaysAsync(ct);
+                await NoteHeldAsync(ct);
                 // Every five minutes: often enough that a power cut loses little, rare enough to spare the disk.
                 if (++ticks % 20 == 0) await SaveTotalsAsync(ct);
             }

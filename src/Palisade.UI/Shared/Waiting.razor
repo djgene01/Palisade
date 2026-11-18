@@ -1,0 +1,13 @@
+@* The count of devices waiting for approval, on the Devices link only. *@
+@if (Href == "/devices" && Count > 0)
+{
+    <span class="@(OnTab ? "absolute top-1 left-1/2 ml-3" : "ml-auto") inline-flex min-w-5 items-center justify-center rounded-full border border-warn bg-warn-soft px-1.5 text-xs font-bold leading-5 text-ink"
+          aria-label="@($"{Count} waiting for approval")">@Count</span>
+}
+
+@code {
+    [Parameter] public string Href { get; set; } = "";
+    [Parameter] public int Count { get; set; }
+    /// <summary>On the phone tab bar, where it sits on the icon's corner instead of at the line's end.</summary>
+    [Parameter] public bool OnTab { get; set; }
+}

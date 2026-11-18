@@ -36,7 +36,7 @@
             {
                 @foreach (var (href, label, _, icon) in Pages)
                 {
-                    <NavLink href="@href" Match="@Match(href)" class="nav-link" ActiveClass="active"><Icon Name="@icon" />@label</NavLink>
+                    <NavLink href="@href" Match="@Match(href)" class="nav-link" ActiveClass="active"><Icon Name="@icon" />@label<Waiting Href="@href" Count="WaitingCount" /></NavLink>
                 }
             }
             @foreach (var link in Shell.ExtraLinks)
@@ -102,7 +102,7 @@
             {
                 <li>
                     <NavLink href="@href" Match="@Match(href)" class="tab-link" ActiveClass="active" @onclick="() => _more = false">
-                        <Icon Name="@icon" /><span>@tab</span>
+                        <Icon Name="@icon" /><span>@tab</span><Waiting Href="@href" Count="WaitingCount" OnTab />
                     </NavLink>
                 </li>
             }
@@ -167,6 +167,9 @@
 
     private bool _dark;
     private bool _more;
+
+    // Devices waiting for approval, shown on the Devices link so they are seen from every page.
+    private int WaitingCount => State.Config?.ZeroTrust.Enabled == true ? State.Waiting.Count : 0;
 
     private bool Ready => State.Config?.SetupComplete == true;
 

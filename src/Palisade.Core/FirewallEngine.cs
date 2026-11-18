@@ -18,6 +18,14 @@ public interface ISystemPlatform
     Task SetAccessAsync(IReadOnlyList<DeviceAccess> access, CancellationToken ct);
     Task<WifiStatus> GetWifiAsync(CancellationToken ct);
     Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct);
+    /// <summary>
+    /// Makes Zero Trust's lists the live ones, at once and without reloading the rules: the approved set, the
+    /// address server's hosts file, and the saved rules that load at boot. <paramref name="live"/> is the
+    /// config in force right now, waiting for confirmation or not.
+    /// </summary>
+    Task SetApprovalsAsync(FirewallConfig live, CancellationToken ct);
+    /// <summary>Hardware addresses the home network port has heard from lately, including devices with addresses set by hand.</summary>
+    Task<IReadOnlyList<string>> GetNeighboursAsync(FirewallConfig live, CancellationToken ct);
 }
 
 /// <summary>
@@ -103,6 +111,17 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
             var current = (_pending ?? _active).Clone();
             config.Access = current.Access;
             config.Names = current.Names;
+            // Zero Trust is changed only through its own calls. An app or page from before it existed sends no
+            // such section, and one with an older copy would undo approvals made since: neither may touch it.
+            config.ZeroTrust = current.ZeroTrust;
+            return await ApplyLockedAsync(config, ct);
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Checks, applies and starts the wait for confirmation. The caller holds the gate.</summary>
+    private async Task<ApplyResult> ApplyLockedAsync(FirewallConfig config, CancellationToken ct)
+    {
             var issues = ConfigValidator.Validate(config);
             if (issues.Count > 0) return ApplyResult.Failed(issues);
             var files = ConfigRenderer.Render(config);
@@ -126,6 +145,90 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
             _deadline = DateTimeOffset.UtcNow + confirmWindow;
             StartTimer();
             return new ApplyResult { Ok = true, ConfirmWithinSeconds = (int)confirmWindow.TotalSeconds };
+    }
+
+    public async Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var config = (_pending ?? _active).Clone();
+            config.SetupComplete = true;
+            var turningOn = request.Enabled && !config.ZeroTrust.Enabled;
+            config.ZeroTrust.Enabled = request.Enabled;
+            // Switching off keeps the holding zone as it was, so {"enabled":false} alone is enough at the console.
+            if (request.Enabled)
+                (config.ZeroTrust.HoldingAddress, config.ZeroTrust.HoldingPrefix) = (request.HoldingAddress.Trim(), request.HoldingPrefix);
+            if (turningOn)
+            {
+                // Everything already here is let in, so switching the mode on cuts nobody in the house off.
+                var leases = await platform.GetLeasesAsync(ct);
+                var neighbours = await platform.GetNeighboursAsync(config, ct);
+                config.ZeroTrust.Approved = ZeroTrustPlan.KnownDevices(config, leases, neighbours, DateTimeOffset.UtcNow);
+            }
+            return await ApplyLockedAsync(config, ct);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default)
+    {
+        if (!ConfigValidator.TryNormalizeMac(change.Mac, out var mac))
+            return ApplyResult.Failed($"\"{change.Mac}\" is not a valid hardware (MAC) address.");
+        var name = (change.Name ?? "").Trim();
+        if (name.Length > 0 && !ConfigValidator.IsSafeName(name))
+            return ApplyResult.Failed("Give the device a short name using letters, numbers and spaces.");
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var live = _pending ?? _active;
+            if (!live.ZeroTrust.Enabled) return ApplyResult.Failed("Zero Trust Mode is off, so there is nothing to approve.");
+            var approved = live.ZeroTrust.Approved.Any(d => d.Mac == mac);
+            var now = DateTimeOffset.UtcNow;
+
+            // Taking access away from an approved device could be this very one: that waits for confirmation.
+            if (approved && change.Action is ApprovalAction.Remove or ApprovalAction.Block)
+            {
+                var config = live.Clone();
+                config.ZeroTrust.Approved.RemoveAll(d => d.Mac == mac);
+                if (change.Action == ApprovalAction.Block)
+                    config.ZeroTrust.Blocked.Add(new BlockedDevice { Mac = mac, Name = name, BlockedAt = now });
+                return await ApplyLockedAsync(config, ct);
+            }
+
+            // Everything else only lets a device in, or keeps a waiting one out: it takes effect at once.
+            void Change(ZeroTrustSettings z)
+            {
+                switch (change.Action)
+                {
+                    case ApprovalAction.Approve:
+                        z.Blocked.RemoveAll(d => d.Mac == mac);
+                        var existing = z.Approved.FirstOrDefault(d => d.Mac == mac);
+                        if (existing is null) z.Approved.Add(new ApprovedDevice { Mac = mac, Name = name, ApprovedAt = now });
+                        else if (name.Length > 0) existing.Name = name;
+                        break;
+                    case ApprovalAction.Unblock:
+                        z.Blocked.RemoveAll(d => d.Mac == mac);
+                        break;
+                    case ApprovalAction.Block:
+                        if (z.Blocked.All(d => d.Mac != mac)) z.Blocked.Add(new BlockedDevice { Mac = mac, Name = name, BlockedAt = now });
+                        break;
+                }
+            }
+            var check = live.Clone();
+            Change(check.ZeroTrust);
+            var issues = ZeroTrustPlan.Validate(check);
+            if (issues.Count > 0) return ApplyResult.Failed(issues);
+            Change(_active.ZeroTrust);
+            if (_pending is not null) Change(_pending.ZeroTrust);
+            if (_active.SetupComplete) await SaveActiveAsync(ct);
+            await platform.SetApprovalsAsync(_pending ?? _active, ct);
+            return new ApplyResult { Ok = true };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log?.Invoke($"Changing an approval failed: {ex.Message}");
+            return ApplyResult.Failed($"The change could not be saved. ({ex.Message})");
         }
         finally { _gate.Release(); }
     }
