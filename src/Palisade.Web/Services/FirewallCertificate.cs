@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Palisade.Core;
 
 namespace Palisade.Web.Services;
 
@@ -22,24 +23,14 @@ public sealed class FirewallCertificate
     public string Pin { get; }
 
     /// <summary>The pin as hex pairs, for comparing by eye: the first 16 bytes are enough for a person.</summary>
-    public string ShortFingerprint => string.Join(':', Convert.FromBase64String(ToBase64(Pin)).Take(16).Select(b => b.ToString("X2")));
+    public string ShortFingerprint => CertificatePin.Display(Pin, 16);
 
     public FirewallCertificate(string dataDirectory)
     {
         var path = Path.Combine(dataDirectory, FileName);
         if (!File.Exists(path)) Create(path);
         Certificate = X509CertificateLoader.LoadPkcs12FromFile(path, null);
-        Pin = PinOf(Certificate);
-    }
-
-    public static string PinOf(X509Certificate2 certificate) =>
-        Convert.ToBase64String(SHA256.HashData(certificate.PublicKey.ExportSubjectPublicKeyInfo()))
-            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-
-    private static string ToBase64(string base64Url)
-    {
-        var s = base64Url.Replace('-', '+').Replace('_', '/');
-        return s + new string('=', (4 - s.Length % 4) % 4);
+        Pin = CertificatePin.Of(Certificate);
     }
 
     private static void Create(string path)

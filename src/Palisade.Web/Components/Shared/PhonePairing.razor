@@ -117,8 +117,7 @@
         // Counted whenever a code goes on screen, also one already waiting when the page opened, so a code
         // cancelled in another window is never mistaken for a device that just linked.
         _linkedBefore = Paired.Devices.Count;
-        // Everything the app needs, in one link: where to go, which key to expect there, and the one-time code.
-        var link = $"palisade://pair?h={Uri.EscapeDataString(Host)}&p={Ports.Api}&k={TlsCertificate.Pin}&c={code.Code}";
+        var link = AppContract.PairingLink(Host, Ports.Api, TlsCertificate.Pin, code.Code);
         using var data = QRCodeGenerator.GenerateQrCode(link, QRCodeGenerator.ECCLevel.M);
         _qr = "data:image/png;base64," + Convert.ToBase64String(new PngByteQRCode(data).GetGraphic(8));
         _ticking?.Cancel();
