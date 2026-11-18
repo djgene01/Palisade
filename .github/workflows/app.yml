@@ -1,0 +1,89 @@
+# Builds the companion app for Android and Windows on every pull request that touches it, the same way the
+# release does, but publishes nothing. The results can be downloaded from the run for testing.
+name: App build
+
+on:
+  pull_request:
+    paths:
+      - "src/Palisade.App/**"
+      - "src/Palisade.UI/**"
+      - "src/Palisade.Client/**"
+      - "src/Palisade.Core/**"
+      - ".github/workflows/app.yml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: "21"
+
+      # Signed the way a release is signed (key from base64, password from the environment, line breaks
+      # stripped), but with a key made here and thrown away, so the release's signing steps are proven on
+      # every pull request.
+      - name: Build the APK
+        run: |
+          set -eu
+          dotnet workload install maui-android
+          keystore="$RUNNER_TEMP/test.keystore"
+          ANDROID_SIGNING_PASSWORD="$(openssl rand -hex 16)"
+          export ANDROID_SIGNING_PASSWORD
+          keytool -genkeypair -keystore "$keystore" -storetype PKCS12 -alias palisade -keyalg RSA -keysize 4096 \
+            -validity 10000 -dname 'CN=Palisade test build' \
+            -storepass:env ANDROID_SIGNING_PASSWORD -keypass:env ANDROID_SIGNING_PASSWORD
+          # As if set from a Windows terminal: base64 with a trailing CR LF, decoded the way release.yml decodes it.
+          encoded="$(base64 -w0 "$keystore")"
+          printf '%s\r\n' "$encoded" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/decoded.keystore"
+          dotnet publish src/Palisade.App -f net10.0-android -c Release -o out --nologo \
+            -p:AndroidPackageFormats=apk -p:ApplicationDisplayVersion=0.0 -p:ApplicationVersion="${{ github.run_number }}" \
+            -p:AndroidKeyStore=true -p:AndroidSigningKeyStore="$RUNNER_TEMP/decoded.keystore" -p:AndroidSigningKeyAlias=palisade \
+            -p:AndroidSigningKeyPass=env:ANDROID_SIGNING_PASSWORD -p:AndroidSigningStorePass=env:ANDROID_SIGNING_PASSWORD
+          rm -f "$keystore" "$RUNNER_TEMP/decoded.keystore"
+          ls -la out/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: palisade-android-test
+          path: out/*-Signed.apk
+          retention-days: 7
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # On Windows the app also targets Android, and restoring it needs that workload as well.
+          dotnet workload install maui-windows maui-android
+          dotnet publish src/Palisade.App -f net10.0-windows10.0.19041.0 -c Release -o out/Palisade --nologo `
+            -p:SelfContained=true -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true
+          if ($LASTEXITCODE -ne 0) { throw 'Building the Windows app failed.' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: palisade-windows-test
+          path: out/Palisade
+          retention-days: 7

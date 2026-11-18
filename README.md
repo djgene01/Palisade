@@ -271,7 +271,19 @@ From here everything is done in the browser: **Overview**, **Devices**, **Conten
 
 ## The companion app
 
-The Palisade app for Android and Windows does everything the firewall's own page does: pause a device, change the content filter, open a port, and the rest. It works from your home network. It is not published in an app store yet, so for now you build it yourself (see [Building from source](#building-from-source)).
+The Palisade app for Android and Windows does everything the firewall's own page does: pause a device, change the content filter, open a port, and the rest. It works from your home network.
+
+**Install it** from the [latest release](https://github.com/djgene01/Palisade/releases/latest), from the first release after v1.2. The firewall must run that release or newer too, for its Phones and tablets section. Until then, build the app yourself (see [Building from source](#building-from-source)). It is not in an app store yet.
+
+- **Android 7 or newer:**
+  1. On the phone, open the release page and download `palisade-android.apk`.
+  2. Open it. Android asks to allow installs from your browser: allow it once.
+  3. To update later, install the newer `palisade-android.apk` the same way. Your linked firewalls stay.
+  4. **If you built the app yourself before**, your copy is signed with a development key, and Android refuses to install a release over it. Uninstall Palisade first, then install the release APK. Uninstalling removes the app's linked firewalls, so link each one again afterwards. You can also remove the old device on the firewall's page, under **Advanced → Phones and tablets**. This is needed only once: later releases update in place.
+- **Windows 10 or 11 (64-bit):**
+  1. Download `palisade-windows-x64.zip` and unzip it anywhere, for example to your Documents.
+  2. Run `Palisade\Palisade.App.exe`. Everything it needs is in the folder. It also needs Microsoft's WebView2 runtime, which comes with Windows 11 and up-to-date Windows 10.
+  3. The app is not code-signed yet, so Windows may warn that it protected your PC. If it does, choose **More info**, then **Run anyway**.
 
 **Link a phone or tablet:**
 
@@ -463,12 +475,20 @@ Then open `http://localhost:8080`. Data is kept in `src/Palisade.Web/data/`.
 
 Copy the folder to the firewall and run `sh install.sh` inside it. A build marked `dev` is not replaced by automatic updates.
 
-**Publish a release.** Push a tag such as `v1.3`. GitHub Actions runs the tests, builds `palisade-linux-x64.tar.gz` and publishes it as a release. Firewalls with automatic updates install it by themselves.
+**Publish a release.** Push a tag such as `v1.3`. GitHub Actions runs the tests, builds `palisade-linux-x64.tar.gz` and publishes it as a release. Firewalls with automatic updates install it by themselves. Two more jobs then add the app to the same release: `palisade-windows-x64.zip`, and the signed `palisade-android.apk`.
 
 ```bash
 git tag v1.3
 git push origin v1.3
 ```
+
+**The Android signing key.** Android only installs an update that carries the same signing key as the app already on the phone. So the key is made once and kept for good:
+
+1. Run `pwsh ./deploy/android-signing-key.ps1`. It creates the key outside the repository, asks for its password without showing it, and offers to store both as the repository secrets `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD`.
+2. Back up the key file and its password, for example in your password manager.
+3. Until those secrets exist, releases have no Android app, and the release run says so.
+
+Every pull request that touches the app also builds both versions (the **App build** workflow), without publishing anything. Its Android build uses a throwaway key and is only for testing.
 
 **Project layout**
 
@@ -480,7 +500,7 @@ src/Palisade.Web      The web interface host: sign-in, setup, the app interface 
 src/Palisade.Client   How the app reaches a real firewall: pairing links, the pinned HTTPS connection, RemoteBackend
 src/Palisade.App      The companion app (.NET MAUI Blazor Hybrid) for Android and Windows
 tests/                Core unit tests, the web interface run in memory, and the client against a running web interface
-deploy/               Installer, systemd units and the Windows publish script
+deploy/               Installer, systemd units, the Windows publish script and the Android signing-key script
 ```
 
 ---
