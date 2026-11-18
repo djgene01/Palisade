@@ -5,8 +5,15 @@ using Palisade.Core;
 namespace Palisade.Web.Services;
 
 /// <summary>Talks to the root agent over its Unix socket. This is the web UI's only route to the system.</summary>
-public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDisposable
+public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IDisposable
 {
+    public async Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsync("dns/flush", null, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
     public async Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default)
     {
         using var response = await _http.PostAsJsonAsync("watch", request, PalisadeJson.Options, ct);
@@ -242,8 +249,10 @@ public sealed class SimulatedUpdates : IUpdates
 }
 
 /// <summary>Stands in for a real watch in the demo, with a made-up list after a short wait.</summary>
-public sealed class SimulatedWatch : ITrafficWatch
+public sealed class SimulatedWatch : ITrafficWatch, IDnsControl
 {
+    public Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default) => Task.FromResult(new ApplyResult { Ok = true });
+
     public async Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default)
     {
         await Task.Delay(TimeSpan.FromSeconds(3), ct);

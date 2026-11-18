@@ -7,8 +7,18 @@ namespace Palisade.Agent;
 
 /// <summary>Applies generated files to a Debian system. Runs as root; nothing else in the product does.</summary>
 [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch
+public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch, IDnsControl
 {
+    public async Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default)
+    {
+        // dnsmasq empties its memory of answers when it is sent this signal. It keeps running, and so do
+        // the extra name servers for devices with their own filter level, which are dnsmasq too.
+        var signalled = await RunAsync("pkill", ["-HUP", "-x", "dnsmasq"], ct);
+        return signalled.ExitCode == 0
+            ? new ApplyResult { Ok = true }
+            : ApplyResult.Failed("The name server is not running, so there was nothing to clear. Save your network settings to start it.");
+    }
+
     private readonly SemaphoreSlim _watchGate = new(1, 1);
     private RelayTracker? _relays;
     private string RelayFile => Path.Combine(dataDirectory, "relays.json");

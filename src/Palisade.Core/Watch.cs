@@ -31,6 +31,12 @@ public interface ITrafficWatch
     Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default);
 }
 
+public interface IDnsControl
+{
+    /// <summary>Makes the firewall's name servers forget every answer they remembered, so the next lookup is asked afresh.</summary>
+    Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default);
+}
+
 public static class WatchPlan
 {
     public const string Table = "palisade_watch";

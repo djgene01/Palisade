@@ -46,6 +46,10 @@ app.MapPost("/access", (List<DeviceAccess> access, CancellationToken ct) => engi
 app.MapGet("/wifi", (CancellationToken ct) => engine.GetWifiAsync(ct));
 app.MapPost("/wifi", (WifiRequest request, CancellationToken ct) => engine.SetWifiAsync(request, ct));
 app.MapPost("/names", (List<DeviceName> names, CancellationToken ct) => engine.SetNamesAsync(names, ct));
+app.MapPost("/dns/flush", (CancellationToken ct) =>
+    app.Services.GetRequiredService<ISystemPlatform>() is IDnsControl dns
+        ? dns.FlushDnsAsync(ct)
+        : Task.FromResult(ApplyResult.Failed("Clearing lookups is not available on this system.")));
 app.MapPost("/watch", (WatchRequest request, CancellationToken ct) =>
     app.Services.GetRequiredService<ISystemPlatform>() is ITrafficWatch watch
         ? watch.WatchAsync(request, ct)
