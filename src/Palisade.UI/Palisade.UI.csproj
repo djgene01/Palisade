@@ -21,8 +21,8 @@
   <ItemGroup>
     <Content Remove="package.json;package-lock.json" />
     <None Include="package.json;package-lock.json" />
-    <!-- The stylesheet also covers the host's own pages (sign-in, setup), so their markup counts as input too. -->
-    <TailwindInput Include="Styles\app.css;**\*.razor;..\Palisade.Web\Components\**\*.razor" Exclude="node_modules\**;bin\**;obj\**" />
+    <!-- The stylesheet also covers the hosts' own screens (web sign-in and setup, the app's linking), so their markup counts as input too. -->
+    <TailwindInput Include="Styles\app.css;**\*.razor;..\Palisade.Web\Components\**\*.razor;..\Palisade.App\Components\**\*.razor" Exclude="node_modules\**;bin\**;obj\**" />
   </ItemGroup>
 
   <!-- Compiles Tailwind into wwwroot/app.css as part of every build and publish, so the firewall never needs Node. -->

@@ -1,10 +1,12 @@
 @implements IDisposable
 @inject FirewallState State
 @inject IConnectionProbe Probe
+@inject ShellOptions Shell
 
 @* Every change goes live first and is only kept once a brand-new connection to the firewall succeeds.
    If it does not, the owner gets a countdown and the agent undoes the change by itself. *@
-<div aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center p-3 sm:p-5">
+@* On phones it sits above the tab bar, which takes the bottom of the screen. *@
+<div aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center p-3 sm:p-5 md:bottom-0">
     @if (_phase != Phase.Idle)
     {
         <div class="pointer-events-auto w-full max-w-xl rounded-lg border-2 p-4 shadow-lg @(_phase is Phase.Unsure ? "border-warn bg-warn-soft" : "border-brand bg-surface")">
@@ -12,6 +14,10 @@
             {
                 case Phase.Checking:
                     <p class="font-semibold">Your change is live. Checking that you can still reach the firewall.</p>
+                    @if (Shell.CanBePaused)
+                    {
+                        <p class="mt-1 text-sm">Stay in the app until it says Saved: leaving now can undo the change.</p>
+                    }
                     break;
                 case Phase.Saved:
                     <p class="font-semibold">Saved. Your change is live and will survive a restart.</p>
@@ -25,6 +31,10 @@
                 case Phase.Unsure:
                     <p class="font-bold">We could not confirm a fresh connection to the firewall.</p>
                     <p class="mt-1">To keep you from being locked out, the change will be undone in <strong>@_secondsLeft seconds</strong> unless you keep it.</p>
+                    @if (Shell.CanBePaused)
+                    {
+                        <p class="mt-1 text-sm">Stay in the app while you decide: if you leave it, the change is undone.</p>
+                    }
                     <div class="mt-3 flex flex-wrap gap-2">
                         <button type="button" class="btn btn-primary" @onclick="KeepAsync">Keep the change</button>
                         <button type="button" class="btn" @onclick="UndoAsync">Undo now</button>

@@ -1,0 +1,13 @@
+@* The name this device gets in the firewall's list of linked devices. *@
+<div class="mt-5">
+    <label for="device-name" class="field-label">Name for this device</label>
+    <input id="device-name" class="input" value="@Value" maxlength="40" @onchange="OnChangeAsync" aria-describedby="device-name-hint" />
+    <p id="device-name-hint" class="field-hint">The firewall's page lists linked devices by this name, so you can tell them apart and remove one.</p>
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    private Task OnChangeAsync(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString() ?? "");
+}

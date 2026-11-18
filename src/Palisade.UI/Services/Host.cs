@@ -29,8 +29,8 @@ public interface IMakerSource
 public sealed class ShellOptions
 {
     /// <summary>
-    /// A component that ends the session, or null when there is nothing to sign out of. It receives one
-    /// parameter, <c>Sidebar</c>: true in the side menu, false in the footer shown on small screens.
+    /// A component without parameters that ends the session, or null when there is nothing to sign out of.
+    /// It is shown in the side menu on wide screens and in the More menu on phones.
     /// </summary>
     public Type? SignOutButton { get; init; }
 
@@ -39,7 +39,30 @@ public sealed class ShellOptions
     /// firewall itself. Each is a component without parameters, shown after the updates section.
     /// </summary>
     public IReadOnlyList<Type> AdvancedSections { get; init; } = [];
+
+    /// <summary>
+    /// True when the screens run on the firewall itself, as the web interface does. Then "can't reach the
+    /// firewall" means its own service is down, and the help points at that; the app shows its own message.
+    /// </summary>
+    public bool OnTheFirewall { get; init; } = true;
+
+    /// <summary>Menu entries only this host has, such as the app's list of firewalls. Shown after the pages.</summary>
+    public IReadOnlyList<ShellLink> ExtraLinks { get; init; } = [];
+
+    /// <summary>The line under the name in the page frame, such as which firewall the app is showing.</summary>
+    public Func<string> Subtitle { get; init; } = () => "Home firewall";
+
+    /// <summary>Told whenever the page switches between light and dark, so the host can colour what is around it.</summary>
+    public Action<bool>? ThemeChanged { get; init; }
+
+    /// <summary>
+    /// True in an app, which the phone may pause when the owner switches away. Paused, it cannot confirm a change,
+    /// and the firewall undoes it after a minute, so the screens ask the owner to stay until it is confirmed.
+    /// </summary>
+    public bool CanBePaused { get; init; }
 }
+
+public sealed record ShellLink(string Href, string Label, string Icon);
 
 public static class PalisadeUiServices
 {

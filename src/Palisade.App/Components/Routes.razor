@@ -1,7 +1,18 @@
-﻿@* The app has no screens of its own yet: every page comes from the shared Palisade.UI library. *@
-<Router AppAssembly="typeof(MainLayout).Assembly" NotFoundPage="typeof(Palisade.UI.Pages.NotFound)">
+﻿@inject ActiveFirewall Active
+@inject NavigationManager Nav
+
+@* The firewall's pages come from the shared Palisade.UI library; the app adds its own for linking and choosing firewalls. *@
+<Router AppAssembly="typeof(Routes).Assembly" AdditionalAssemblies="[typeof(MainLayout).Assembly]" NotFoundPage="typeof(Palisade.UI.Pages.NotFound)">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Nothing to show yet: start with linking a firewall or trying the demo.
+        if (!Active.IsChosen) Nav.NavigateTo("/start", replace: true);
+    }
+}

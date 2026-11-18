@@ -212,6 +212,42 @@ public sealed class RemoteTests : IDisposable
     }
 
     [Fact]
+    public async Task After_switching_to_a_firewall_out_of_reach_nothing_of_the_previous_one_is_left_to_save()
+    {
+        var link = await _firewall.LinkAsync();
+        var swappable = new Swappable(new RemoteBackend(link));
+        var state = new FirewallState(swappable, new RemoteMakers((RemoteBackend)swappable.Current));
+        await state.LoadAsync();
+        Assert.NotNull(state.Config);
+
+        // What the app does when another firewall is chosen, here one that does not answer.
+        swappable.Current = new RemoteBackend(link with { Port = RunningFirewall.FreePort() });
+        state.Reset();
+        await state.LoadAsync();
+
+        Assert.Null(state.Config);
+        Assert.NotNull(state.Error);
+        Assert.Contains("Settings have not loaded yet", Assert.Single(await state.SaveAsync(_ => { })).Message);
+    }
+
+    /// <summary>Stands in for the app's switchable firewall: every call goes to whichever backend is current.</summary>
+    private sealed class Swappable(IFirewallBackend current) : IFirewallBackend
+    {
+        public IFirewallBackend Current { get; set; } = current;
+        public Task<SystemStatus> GetStatusAsync(CancellationToken ct = default) => Current.GetStatusAsync(ct);
+        public Task<FirewallConfig> GetConfigAsync(CancellationToken ct = default) => Current.GetConfigAsync(ct);
+        public Task<ApplyResult> ApplyAsync(FirewallConfig config, CancellationToken ct = default) => Current.ApplyAsync(config, ct);
+        public Task ConfirmAsync(CancellationToken ct = default) => Current.ConfirmAsync(ct);
+        public Task RevertAsync(CancellationToken ct = default) => Current.RevertAsync(ct);
+        public Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct = default) => Current.GetLeasesAsync(ct);
+        public Task<UsageReport> GetUsageAsync(CancellationToken ct = default) => Current.GetUsageAsync(ct);
+        public Task<ApplyResult> SetAccessAsync(List<DeviceAccess> access, CancellationToken ct = default) => Current.SetAccessAsync(access, ct);
+        public Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default) => Current.SetNamesAsync(names, ct);
+        public Task<WifiStatus> GetWifiAsync(CancellationToken ct = default) => Current.GetWifiAsync(ct);
+        public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default) => Current.SetWifiAsync(request, ct);
+    }
+
+    [Fact]
     public async Task A_long_list_of_devices_is_asked_about_in_slices_the_firewall_accepts()
     {
         using var backend = new RemoteBackend(await _firewall.LinkAsync());

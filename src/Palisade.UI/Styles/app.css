@@ -2,8 +2,9 @@
 @source "../Layout";
 @source "../Pages";
 @source "../Shared";
-/* The web interface's own pages (sign-in, setup) use this stylesheet too. */
+/* The hosts' own screens use this stylesheet too: the web interface's sign-in and setup, the app's linking screens. */
 @source "../../Palisade.Web/Components";
+@source "../../Palisade.App/Components";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -174,6 +175,19 @@
 
     .nav-link.active {
         @apply bg-brand text-on-brand hover:bg-brand hover:text-on-brand;
+    }
+
+    /* A tab on the phone tab bar: icon over a short word, a tall enough target for a thumb. */
+    .tab-link {
+        @apply flex min-h-16 flex-col items-center justify-center gap-1 text-xs font-semibold text-muted hover:text-ink;
+    }
+
+    .tab-link.active {
+        @apply text-brand;
+    }
+
+    .tab-link.active .icon {
+        @apply rounded-full bg-brand-soft px-4 py-0.5 box-content;
     }
 
     .icon {

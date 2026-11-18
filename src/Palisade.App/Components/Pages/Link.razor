@@ -1,0 +1,140 @@
+@page "/link"
+@layout AppLayout
+@inject ActiveFirewall Active
+@inject FirewallSwitcher Switcher
+@inject QrScanner Scanner
+
+<PageTitle>Link your firewall · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold" tabindex="-1">Link your firewall</h1>
+<p class="mt-3 text-muted">On a computer, open your firewall's page, go to <strong>Advanced</strong>, then <strong>Phones and tablets</strong>, and choose <strong>Link a phone</strong>. It shows a code that works for five minutes.</p>
+
+@if (_problem is not null)
+{
+    <p role="alert" class="mt-5 rounded-md border border-danger bg-danger-soft p-3">@_problem</p>
+}
+
+@switch (_step)
+{
+    case Step.Choose:
+        <div class="mt-6 flex flex-col gap-3">
+            @* A computer rarely has a camera that can be pointed at its own screen, so it types instead. *@
+            @if (CanScan)
+            {
+                <button type="button" class="btn btn-primary justify-center py-3 text-lg" disabled="@_busy" @onclick="ScanAsync">Scan the code</button>
+                <button type="button" class="btn btn-quiet justify-center py-3" disabled="@_busy" @onclick="() => Go(Step.Address)">Type the address and code instead</button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-primary justify-center py-3 text-lg" disabled="@_busy" @onclick="() => Go(Step.Address)">Type the address and code</button>
+            }
+        </div>
+        break;
+
+    case Step.Scanned:
+        <div class="panel mt-6 p-4">
+            <p class="font-bold">Firewall at @_address!.Host</p>
+            <p class="mt-1 text-sm text-muted">Fingerprint <span class="font-mono">@CertificatePin.Display(_pin!)</span>, the same one the firewall's page shows.</p>
+        </div>
+        <DeviceName @bind-Value="_name" />
+        <button type="button" class="btn btn-primary mt-5 w-full justify-center py-3" disabled="@_busy" @onclick="LinkAsync">@(_busy ? "Linking" : "Link this device")</button>
+        <button type="button" class="btn btn-quiet mt-2 w-full justify-center" disabled="@_busy" @onclick="() => Go(Step.Choose)">Back</button>
+        break;
+
+    case Step.Address:
+        <form class="mt-6 space-y-4" @onsubmit="IntroduceAsync">
+            <div>
+                <label for="address" class="field-label">Firewall address</label>
+                <input id="address" class="input" @bind="_typedAddress" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.50.1" aria-describedby="address-hint" />
+                <p id="address-hint" class="field-hint">The address shown next to the code, such as 192.168.50.1.</p>
+            </div>
+            <button type="submit" class="btn btn-primary w-full justify-center py-3" disabled="@_busy">@(_busy ? "Looking for it" : "Find the firewall")</button>
+            <button type="button" class="btn btn-quiet w-full justify-center" disabled="@_busy" @onclick="() => Go(Step.Choose)">Back</button>
+        </form>
+        break;
+
+    case Step.Typed:
+        <div class="panel mt-6 border-warn p-4">
+            <p class="font-bold">Found a Palisade firewall at @_address!.Host</p>
+            <p class="mt-2">Check that the firewall's page shows this fingerprint, so you know this is your firewall and not something pretending to be it:</p>
+            <p class="mt-2 font-mono text-lg font-bold tracking-wide">@CertificatePin.Display(_pin!)</p>
+        </div>
+        <form class="mt-5 space-y-4" @onsubmit="LinkAsync">
+            <div>
+                <label for="code" class="field-label">Code</label>
+                <input id="code" class="input font-mono text-lg uppercase tracking-wider" @bind="_code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH" />
+            </div>
+            <DeviceName @bind-Value="_name" />
+            <button type="submit" class="btn btn-primary w-full justify-center py-3" disabled="@(_busy || string.IsNullOrWhiteSpace(_code))">@(_busy ? "Linking" : "The fingerprint matches: link")</button>
+            <button type="button" class="btn btn-quiet w-full justify-center" disabled="@_busy" @onclick="() => Go(Step.Address)">Back</button>
+        </form>
+        break;
+}
+
+@if (Active.IsChosen)
+{
+    <a href="/" class="btn btn-quiet mt-8 justify-center">Back to @Active.Name</a>
+}
+
+@code {
+    private enum Step { Choose, Scanned, Address, Typed }
+
+    private static bool CanScan => DeviceInfo.Current.Idiom == DeviceIdiom.Phone || DeviceInfo.Current.Idiom == DeviceIdiom.Tablet;
+
+    private Step _step;
+    private bool _busy;
+    private string? _problem;
+    private FirewallAddress? _address;
+    private string? _pin;
+    private string _code = "";
+    private string _typedAddress = "";
+    // What the firewall's list of linked devices will call this one. The phone's own name is a good start.
+    private string _name = DeviceInfo.Current.Name;
+
+    private void Go(Step step)
+    {
+        _problem = null;
+        _step = step;
+    }
+
+    private async Task ScanAsync() => await BusyAsync(async () =>
+    {
+        var text = await Scanner.ScanAsync();
+        if (text is null) return;
+        if (PairingLinks.Parse(text) is not { } invite)
+        {
+            _problem = "That code is not a Palisade linking code. Scan the one on the firewall's Advanced page.";
+            return;
+        }
+        (_address, _pin, _code) = (invite.Address, invite.Address.Pin, invite.Code);
+        _step = Step.Scanned;
+    });
+
+    private async Task IntroduceAsync() => await BusyAsync(async () =>
+    {
+        if (PairingLinks.Typed(_typedAddress) is not { } address)
+        {
+            _problem = "That is not an address. Type it as the firewall's page shows it, such as 192.168.50.1.";
+            return;
+        }
+        var (_, pin) = await PinnedConnection.IntroduceAsync(address);
+        (_address, _pin) = (address, pin);
+        _step = Step.Typed;
+    });
+
+    private async Task LinkAsync() => await BusyAsync(async () =>
+    {
+        var link = await Pairing.PairAsync(_address!, _pin!, _code, _name);
+        await Switcher.AddAndShowAsync(link);
+    });
+
+    private async Task BusyAsync(Func<Task> work)
+    {
+        _busy = true;
+        _problem = null;
+        try { await work(); }
+        catch (PlainWordsException ex) { _problem = ex.Message; }
+        catch (Exception ex) { _problem = $"Something went wrong while linking. ({ex.Message})"; }
+        finally { _busy = false; }
+    }
+}

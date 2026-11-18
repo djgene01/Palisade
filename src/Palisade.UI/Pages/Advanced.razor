@@ -107,7 +107,7 @@ else
     {
         _updateBusy = true;
         try { _update = await call(); }
-        catch (Exception ex) { _updateError = $"The firewall service did not answer about updates. ({ex.Message})"; }
+        catch (Exception ex) { _updateError = Problem.Explain(ex, "The firewall service did not answer about updates."); }
         _updateBusy = false;
     }
 

@@ -299,7 +299,7 @@
         if (_watching) return;
         (_watchFor, _watchName, _watching, _watch) = (address, name, true, null);
         try { _watch = await Watcher.WatchAsync(new WatchRequest { Address = address }); }
-        catch (Exception ex) { _watch = new WatchReport { Problem = $"The firewall did not answer. ({ex.Message})" }; }
+        catch (Exception ex) { _watch = new WatchReport { Problem = Palisade.Core.Problem.Explain(ex, "The firewall did not answer.") }; }
         _watching = false;
     }
 

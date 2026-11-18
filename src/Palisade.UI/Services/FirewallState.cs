@@ -61,7 +61,7 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
         }
         catch (Exception ex)
         {
-            return [new("", $"The firewall did not answer while changing the Wi-Fi. If you are connected through that Wi-Fi, this is expected: reconnect and look again. ({ex.Message})")];
+            return [new("", Problem.Explain(ex, "The firewall did not answer while changing the Wi-Fi. If you are connected through that Wi-Fi, this is expected: reconnect and look again."))];
         }
     }
     public string? Error { get; private set; }
@@ -69,6 +69,16 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
     public event Action? Changed;
     /// <summary>Raised after a change went live and is waiting for confirmation.</summary>
     public event Action? ApplyStarted;
+
+    /// <summary>
+    /// Forgets everything loaded so far. Needed when the backend now stands for a different firewall: a load that
+    /// then fails must not leave the previous firewall's settings on screen, where a save would send them to this one.
+    /// </summary>
+    public void Reset()
+    {
+        (Config, Status, Leases, Usage, Wifi, Error) = (null, null, [], null, null, null);
+        Changed?.Invoke();
+    }
 
     public async Task LoadAsync()
     {
@@ -81,7 +91,7 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
         }
         catch (Exception ex)
         {
-            Error = $"The firewall service is not answering. ({ex.Message})";
+            Error = Problem.Explain(ex, "The firewall service is not answering.");
         }
         Changed?.Invoke();
     }
@@ -97,7 +107,7 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
         }
         catch (Exception ex)
         {
-            Error = $"The firewall service is not answering. ({ex.Message})";
+            Error = Problem.Explain(ex, "The firewall service is not answering.");
         }
         Changed?.Invoke();
     }
@@ -115,7 +125,7 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
         }
         catch (Exception ex)
         {
-            return [new("", $"The firewall service is not answering, so nothing was changed. ({ex.Message})")];
+            return [new("", Problem.Explain(ex, "The firewall service is not answering, so nothing was changed.", nothingChanged: true))];
         }
         if (!result.Ok) return result.Issues;
 
@@ -141,7 +151,7 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
         }
         catch (Exception ex)
         {
-            return [new("", $"The firewall service is not answering, so nothing was changed. ({ex.Message})")];
+            return [new("", Problem.Explain(ex, "The firewall service is not answering, so nothing was changed.", nothingChanged: true))];
         }
         Changed?.Invoke();
         return [];
@@ -162,7 +172,7 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
         }
         catch (Exception ex)
         {
-            return [new("", $"The firewall service is not answering, so nothing was changed. ({ex.Message})")];
+            return [new("", Problem.Explain(ex, "The firewall service is not answering, so nothing was changed.", nothingChanged: true))];
         }
         Changed?.Invoke();
         return [];
