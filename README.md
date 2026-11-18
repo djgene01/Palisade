@@ -279,6 +279,7 @@ The Palisade app for Android and Windows does everything the firewall's own page
   1. On the phone, open the release page and download `palisade-android.apk`.
   2. Open it. Android asks to allow installs from your browser: allow it once.
   3. To update later, install the newer `palisade-android.apk` the same way. Your linked firewalls stay.
+  4. **If you built the app yourself before**, your copy is signed with a development key, and Android refuses to install a release over it. Uninstall Palisade first, then install the release APK. Uninstalling removes the app's linked firewalls, so link each one again afterwards. You can also remove the old device on the firewall's page, under **Advanced → Phones and tablets**. This is needed only once: later releases update in place.
 - **Windows 10 or 11 (64-bit):**
   1. Download `palisade-windows-x64.zip` and unzip it anywhere, for example to your Documents.
   2. Run `Palisade\Palisade.App.exe`. Everything it needs is in the folder. It also needs Microsoft's WebView2 runtime, which comes with Windows 11 and up-to-date Windows 10.
