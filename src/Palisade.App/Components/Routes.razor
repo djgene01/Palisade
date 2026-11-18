@@ -1,0 +1,7 @@
+﻿@* The app has no screens of its own yet: every page comes from the shared Palisade.UI library. *@
+<Router AppAssembly="typeof(MainLayout).Assembly" NotFoundPage="typeof(Palisade.UI.Pages.NotFound)">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

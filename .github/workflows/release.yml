@@ -21,8 +21,9 @@ jobs:
         with:
           node-version: "22"
 
+      # Only the firewall's own projects: the solution also holds the companion app, which needs the MAUI workload.
       - name: Test
-        run: dotnet test --nologo
+        run: dotnet test tests/Palisade.Core.Tests --nologo
 
       - name: Build the package
         run: |
