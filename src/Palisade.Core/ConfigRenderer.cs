@@ -35,7 +35,7 @@ public static class ConfigRenderer
     {
         var wan = Quote(c.WanInterface);
         var lan = Quote(c.LanInterface);
-        var manage = $"{{ {PalisadeDefaults.SshPort}, {PalisadeDefaults.WebPort}, {PalisadeDefaults.CheckPort} }}";
+        var manage = $"{{ {string.Join(", ", PalisadeDefaults.ManagementPorts)} }}";
         var enforced = FilterPlan.Enforced(c);
         var instances = FilterPlan.InstanceLevels(c);
         const string dns = "meta l4proto { tcp, udp } th dport";

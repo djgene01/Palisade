@@ -12,8 +12,13 @@ public static class PalisadeDefaults
     public const int WebPort = 8080;
     /// <summary>Second listener used only to prove a brand-new connection still gets through after a change.</summary>
     public const int CheckPort = 8081;
+    /// <summary>Encrypted connection for the companion app. Only the app's interface answers here, never the web pages.</summary>
+    public const int ApiPort = 8443;
     public const int SshPort = 22;
     public const int ConfirmSeconds = 60;
+
+    /// <summary>Every port that reaches the firewall itself, in the order the rules list them.</summary>
+    public static readonly int[] ManagementPorts = [SshPort, WebPort, CheckPort, ApiPort];
 }
 
 public sealed class FirewallConfig

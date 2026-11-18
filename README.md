@@ -351,7 +351,7 @@ Palisade is two small programs and two standard system tools.
 
 | Part | Runs as | Job |
 |---|---|---|
-| **palisade-web** | unprivileged user `palisade` | The web interface on port **8080**. It cannot change the system. It can only send a whole new configuration to the agent. |
+| **palisade-web** | unprivileged user `palisade` | The web interface on port **8080**, and the companion app's encrypted interface on port **8443**. It cannot change the system. It can only send a whole new configuration to the agent. |
 | **palisade-agent** | root | Listens only on a Unix socket (`/run/palisade/agent.sock`) that the web user may open. It checks a configuration, writes the system files and applies them. It accepts whole configurations, never commands. |
 | **nftables** | system | The firewall and NAT rules. Loaded at boot by `nftables.service` from `/etc/nftables.conf`, so the network is protected even before Palisade starts. |
 | **dnsmasq** | system | Addresses (DHCP) and name lookups (DNS) for the home network. Devices with their own filter level get their own instance (`palisade-dns@<level>`). |
@@ -370,7 +370,7 @@ Every change follows the same path:
 |---|---|
 | `/opt/palisade/` | The programs and the installed `VERSION` |
 | `/var/lib/palisade/` | Settings (`config.json`), usage totals, update settings |
-| `/var/lib/palisade-web/` | Admin password hash and session keys |
+| `/var/lib/palisade-web/` | Admin password hash, session keys, the app certificate (`tls.pfx`) and linked devices (`devices.json`) |
 | `/etc/nftables.conf` | Firewall rules (rewritten by Palisade) |
 | `/etc/dnsmasq.d/palisade.conf`, `/etc/palisade/dns/` | DHCP and DNS settings |
 | `/etc/network/interfaces.d/palisade-*` | Home network port, and the internet port or Wi-Fi when Palisade looks after them |
@@ -385,7 +385,9 @@ Every change follows the same path:
 - The web interface uses **plain HTTP** on port 8080 and has a **single admin password**. Use it only from your home network. Management from the internet side is **off** by default, and should stay off unless the internet side is a network you trust.
 - The password is stored as a salted PBKDF2-SHA256 hash. Repeated wrong passwords slow down further attempts.
 - The web interface runs as an unprivileged, sandboxed systemd service with no capabilities. Only the agent runs as root, and it only accepts complete configurations, which are validated before any file is written.
-- From the home network port, the firewall itself accepts only the web interface (8080/8081), SSH (22), DHCP, DNS and ping. From the internet side it accepts only ping, unless you allow management from there.
+- The companion app connects on port **8443** over HTTPS, using a certificate the firewall makes for itself on first start. Only the app's interface answers there, and that interface never answers over plain HTTP.
+- **Linking a phone.** You link a phone from **Advanced → Phones and tablets** while signed in. That shows a one-time code that lasts 5 minutes and is thrown away after 5 wrong guesses. The app checks the firewall's key fingerprint, then receives its own token. Only a hash of each token is stored, and you can remove any linked device there, which shuts it out at once.
+- From the home network port, the firewall itself accepts only the web interface (8080/8081), the app interface (8443), SSH (22), DHCP, DNS and ping. From the internet side it accepts only ping, unless you allow management from there.
 
 Found a security problem? Please open an issue without the details and ask for a private contact, or use GitHub's private vulnerability reporting if it is enabled.
 
@@ -438,7 +440,7 @@ src/Palisade.Core     Configuration model, validation and the generators for nft
 src/Palisade.Agent    The root service: applies configurations, reads usage, installs updates
 src/Palisade.UI       The screens and stylesheet, shared by the web interface and the coming companion app
 src/Palisade.Web      The web interface host: sign-in, setup, and the connection to the agent
-tests/                Unit tests for Palisade.Core
+tests/                Unit tests for Palisade.Core, and tests that run the web interface and app interface in memory
 deploy/               Installer, systemd units and the Windows publish script
 ```
 

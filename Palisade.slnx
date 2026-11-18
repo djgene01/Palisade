@@ -7,5 +7,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Palisade.Core.Tests/Palisade.Core.Tests.csproj" />
+    <Project Path="tests/Palisade.Web.Tests/Palisade.Web.Tests.csproj" />
   </Folder>
 </Solution>

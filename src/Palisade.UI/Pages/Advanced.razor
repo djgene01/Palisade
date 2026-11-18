@@ -1,5 +1,6 @@
 @page "/advanced"
 @inherits StatePage
+@inject ShellOptions Shell
 
 <PageTitle>Advanced · Palisade</PageTitle>
 
@@ -57,6 +58,11 @@
         </form>
     }
 </section>
+
+@foreach (var section in Shell.AdvancedSections)
+{
+    <DynamicComponent Type="section" />
+}
 
 @{ var files = Render(); }
 @if (files is null)
