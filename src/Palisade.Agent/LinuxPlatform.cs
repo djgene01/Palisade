@@ -68,7 +68,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         _live = live.Clone();
         if (!live.ZeroTrust.Enabled) return;
         // The address server first: the hosts file decides who gets a home address on the next request.
-        await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(live.ZeroTrust), ct);
+        await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(live), ct);
         // The kernel's set in one step, without reloading the rules (which would empty other live lists).
         var path = Path.Combine(dataDirectory, "approved.nft");
         await File.WriteAllTextAsync(path, ZeroTrustPlan.SetScript(live.ZeroTrust), ct);
@@ -249,7 +249,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         var nftCheck = await RunAsync("nft", ["-c", "-f", nft], ct);
         if (nftCheck.ExitCode != 0) problems.Add($"The firewall rules were rejected: {nftCheck.Error.Trim()}");
         // The test reads the hosts file the settings point at, so it has to exist first.
-        if (config.ZeroTrust.Enabled) await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(config.ZeroTrust), ct);
+        if (config.ZeroTrust.Enabled) await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(config), ct);
         var dnsmasqCheck = await RunAsync("dnsmasq", ["--test", $"--conf-file={dnsmasq}"], ct);
         if (dnsmasqCheck.ExitCode != 0) problems.Add($"The DHCP settings were rejected: {dnsmasqCheck.Error.Trim()}");
         foreach (var instance in files.DnsInstances)
@@ -282,7 +282,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         }
 
         // The name servers start before the rules that point devices at them, so no lookup is sent to a port nobody answers yet.
-        if (config.ZeroTrust.Enabled) await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(config.ZeroTrust), ct);
+        if (config.ZeroTrust.Enabled) await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(config), ct);
         await WriteAtomicAsync(DnsmasqConf, files.Dnsmasq, ct);
         await MustRunAsync("systemctl", ["enable", "dnsmasq"], ct);
         await MustRunAsync("systemctl", ["restart", "dnsmasq"], ct);
