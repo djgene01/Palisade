@@ -38,6 +38,7 @@ public static class MauiProgram
         builder.Services.AddSingleton(active);
         builder.Services.AddSingleton<IFirewallBackend>(active);
         builder.Services.AddSingleton<IUpdates>(active);
+        builder.Services.AddSingleton<ISystemHealth>(active);
         builder.Services.AddSingleton<ITrafficWatch>(active);
         builder.Services.AddSingleton<IDnsControl>(active);
         builder.Services.AddSingleton<IConnectionProbe>(active);

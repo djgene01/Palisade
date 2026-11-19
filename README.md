@@ -68,6 +68,7 @@
 - Devices listed with names, type icons and maker.
 - **Where to?** briefly records which sites one device connects to.
 - Pause a device, or give it off times such as school nights.
+- **System**: the firewall machine's processor, memory and disk use right now, and over the last hour, day, week or month.
 - **Zero Trust Mode**: a new device gets nothing until you approve it, on the page or in the app. Until then it waits in a holding zone, and what it tries is recorded.
 
 **Looks after itself**
@@ -440,7 +441,7 @@ Every change follows the same path:
 | Path | What |
 |---|---|
 | `/opt/palisade/` | The programs and the installed `VERSION` |
-| `/var/lib/palisade/` | Settings (`config.json`), usage totals, update settings |
+| `/var/lib/palisade/` | Settings (`config.json`), usage totals, update settings, processor, memory and disk history (`health.json`) |
 | `/var/lib/palisade-web/` | Admin password hash, session keys, the app certificate (`tls.pfx`) and linked devices (`devices.json`) |
 | `/etc/nftables.conf` | Firewall rules (rewritten by Palisade) |
 | `/etc/dnsmasq.d/palisade.conf`, `/etc/palisade/dns/` | DHCP and DNS settings |

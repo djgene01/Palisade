@@ -102,6 +102,7 @@ public sealed class AppApiTests : IDisposable
     {
         var anonymous = _web.Https();
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/zerotrust", new ZeroTrustRequest(), WebInterface.Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/health?range=Week")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/approvals", new ApprovalChange { Mac = "52:54:00:bb:00:66" }, WebInterface.Json)).StatusCode);
     }
 

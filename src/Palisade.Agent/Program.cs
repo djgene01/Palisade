@@ -33,8 +33,13 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp => new Updater(dataDirectory,
     builder.Configuration["Palisade:UpdateRepository"] ?? "djgene01/Palisade", sp.GetRequiredService<ILogger<Updater>>()));
 
+builder.Services.AddSingleton(sp => new HealthMonitor(dataDirectory, sp.GetRequiredService<ILogger<HealthMonitor>>()));
+
 var app = builder.Build();
 var updater = app.Services.GetRequiredService<Updater>();
+// Processor, memory and disk history: kept from the start, before the firewall is even set up.
+var health = app.Services.GetRequiredService<HealthMonitor>();
+health.Start();
 var engine = app.Services.GetRequiredService<FirewallEngine>();
 await engine.InitializeAsync();
 
@@ -65,6 +70,7 @@ app.MapGet("/held/capture", async (CancellationToken ct) =>
     app.Services.GetRequiredService<ISystemPlatform>() is IHeldCapture capture && await capture.GetHeldCaptureAsync(ct) is { } zip
         ? Results.File(zip, "application/zip", "palisade-waiting-devices.zip")
         : Results.NoContent());
+app.MapGet("/health", (HealthRange? range, CancellationToken ct) => health.GetHealthAsync(range ?? HealthRange.Day, ct));
 app.MapPost("/config/confirm", async (CancellationToken ct) => { await engine.ConfirmAsync(ct); return Results.NoContent(); });
 app.MapPost("/config/revert", async (CancellationToken ct) => { await engine.RevertAsync(ct); return Results.NoContent(); });
 

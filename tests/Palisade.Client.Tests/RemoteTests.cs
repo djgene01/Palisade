@@ -183,6 +183,11 @@ public sealed class RemoteTests : IDisposable
         Assert.NotNull(await backend.GetLeasesAsync());
         Assert.NotNull(await backend.GetUsageAsync());
         Assert.NotNull(await backend.GetWifiAsync());
+        var health = await backend.GetHealthAsync(HealthRange.Week);
+        Assert.Equal(HealthRange.Week, health.Range);
+        Assert.Empty(health.Problem);
+        Assert.NotNull(health.Now);
+        Assert.NotEmpty(health.Points);
         Assert.True((await backend.SetNamesAsync([new DeviceName { Mac = "52:54:00:aa:00:01", Name = "Gran's tablet" }])).Ok);
         Assert.Equal("Gran's tablet", Assert.Single((await backend.GetConfigAsync()).Names).Name);
         Assert.True((await backend.SetAccessAsync([])).Ok);

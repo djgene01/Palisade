@@ -8,7 +8,7 @@ namespace Palisade.Client;
 /// the web interface's agent client offers them, so every page works unchanged; only the road differs.
 /// Failures come back as <see cref="FirewallException"/> in words the pages can show as they are.
 /// </summary>
-public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IDisposable
+public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, ISystemHealth, IDisposable
 {
     // Short for reads and saves, so a firewall out of reach is reported quickly. The agent itself allows a
     // change up to a minute; installing an update can download for minutes on a slow line.
@@ -39,6 +39,15 @@ public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, I
     // A firewall from before Zero Trust Mode does not know these two calls; it is told to update.
     public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => NewerAsync(PostAsync<ApplyResult>("zerotrust", request, Change, ct));
     public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => NewerAsync(PostAsync<ApplyResult>("approvals", change, Change, ct));
+
+    public async Task<HealthReport> GetHealthAsync(HealthRange range, CancellationToken ct = default)
+    {
+        try { return await GetAsync<HealthReport>($"health?range={range}", ct); }
+        catch (FirewallException ex) when (ex.Message.Contains("(404", StringComparison.Ordinal))
+        {
+            return new HealthReport { Range = range, Problem = "This firewall is too old to show its processor, memory and disk. Update it from its Advanced page." };
+        }
+    }
 
     private static async Task<ApplyResult> NewerAsync(Task<ApplyResult> call)
     {
