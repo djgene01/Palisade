@@ -60,6 +60,9 @@ public sealed class ShellOptions
     /// and the firewall undoes it after a minute, so the screens ask the owner to stay until it is confirmed.
     /// </summary>
     public bool CanBePaused { get; init; }
+
+    /// <summary>Where the capture of waiting devices' packets can be downloaded, or null where it can't (the demo, the app).</summary>
+    public string? CaptureDownloadUrl { get; init; }
 }
 
 public sealed record ShellLink(string Href, string Label, string Icon);

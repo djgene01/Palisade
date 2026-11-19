@@ -7,6 +7,8 @@
 <h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Devices</h1>
 <p class="mt-2 max-w-2xl text-lg text-muted">Everything that has joined your network. Choose a device, then use the buttons to pause it, limit it or fix its address.</p>
 
+<WaitingDevices />
+
 @{
     var devices = State.Devices();
     var now = DateTimeOffset.Now;
@@ -77,6 +79,18 @@
                     @if (chosen?.BlockRule is not null)
                     {
                         <button type="button" class="btn" disabled="@_busy" @onclick="() => UnblockAsync(chosen)"><Icon Name="unlock" />Remove block rule</button>
+                    }
+                    @if (Config.ZeroTrust.Enabled && chosen is not null)
+                    {
+                        @if (Config.ZeroTrust.Approved.Any(a => a.Mac == chosen.Mac))
+                        {
+                            <button type="button" class="btn" disabled="@_busy" @onclick="() => _removeApprovalFor = chosen"><Icon Name="shield" />Remove approval</button>
+                        }
+                        else
+                        {
+                            @* Here but not approved: an address set by hand, or approval just taken away. It is cut off until approved. *@
+                            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="() => ApproveAsync(chosen)"><Icon Name="shield-check" />Approve</button>
+                        }
                     }
                 </div>
 
@@ -269,7 +283,34 @@
     </div>
 </Modal>
 
+<Modal Open="_removeApprovalFor is not null" Title="@($"Remove approval for {_removeApprovalFor?.Name}")" OnClose="() => _removeApprovalFor = null">
+    <p>It loses the internet, your other devices and this firewall's page until it is approved again. If it asks for an address, it is moved into the holding zone.</p>
+    <p class="mt-3 rounded-md border border-warn bg-warn-soft p-3">If this is the device you are using now, you will lose this page too. Like every change, it is undone after a minute unless this page can still reach the firewall.</p>
+    <div class="mt-5 flex flex-wrap gap-2">
+        <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="RemoveApprovalAsync">Remove approval</button>
+        <button type="button" class="btn btn-quiet" @onclick="() => _removeApprovalFor = null">Keep it approved</button>
+    </div>
+</Modal>
+
 @code {
+    private Device? _removeApprovalFor;
+
+    private async Task ApproveAsync(Device device)
+    {
+        _busy = true;
+        Issues = await State.ChangeApprovalAsync(ApprovalAction.Approve, device.Mac, device.Renamed ? device.Name : "");
+        _busy = false;
+    }
+
+    private async Task RemoveApprovalAsync()
+    {
+        var device = _removeApprovalFor!;
+        _busy = true;
+        Issues = await State.ChangeApprovalAsync(ApprovalAction.Remove, device.Mac);
+        _busy = false;
+        _removeApprovalFor = null;
+    }
+
     private static readonly DayOfWeek[] Week =
         [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
 

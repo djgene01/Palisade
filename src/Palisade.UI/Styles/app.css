@@ -179,7 +179,7 @@
 
     /* A tab on the phone tab bar: icon over a short word, a tall enough target for a thumb. */
     .tab-link {
-        @apply flex min-h-16 flex-col items-center justify-center gap-1 text-xs font-semibold text-muted hover:text-ink;
+        @apply relative flex min-h-16 flex-col items-center justify-center gap-1 text-xs font-semibold text-muted hover:text-ink;
     }
 
     .tab-link.active {

@@ -59,6 +59,12 @@ app.MapPost("/update/settings", (UpdateSettings settings, CancellationToken ct) 
 app.MapPost("/update/check", (CancellationToken ct) => updater.CheckUpdateAsync(install: false, ct));
 app.MapPost("/update/install", (CancellationToken ct) => updater.CheckUpdateAsync(install: true, ct));
 app.MapPost("/config/apply", (FirewallConfig config, CancellationToken ct) => engine.ApplyAsync(config, ct));
+app.MapPost("/zerotrust", (ZeroTrustRequest request, CancellationToken ct) => engine.SetZeroTrustAsync(request, ct));
+app.MapPost("/approvals", (ApprovalChange change, CancellationToken ct) => engine.ChangeApprovalAsync(change, ct));
+app.MapGet("/held/capture", async (CancellationToken ct) =>
+    app.Services.GetRequiredService<ISystemPlatform>() is IHeldCapture capture && await capture.GetHeldCaptureAsync(ct) is { } zip
+        ? Results.File(zip, "application/zip", "palisade-waiting-devices.zip")
+        : Results.NoContent());
 app.MapPost("/config/confirm", async (CancellationToken ct) => { await engine.ConfirmAsync(ct); return Results.NoContent(); });
 app.MapPost("/config/revert", async (CancellationToken ct) => { await engine.RevertAsync(ct); return Results.NoContent(); });
 

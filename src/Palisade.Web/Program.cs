@@ -54,7 +54,13 @@ builder.Services.AddSingleton(new PasswordStore(dataDirectory));
 builder.Services.AddSingleton<IMakerSource>(new MakerLookup(dataDirectory, builder.Configuration.GetValue("Palisade:MakerLookup", backendKind != "simulated")));
 builder.Services.AddPalisadeUi();
 builder.Services.AddScoped<IConnectionProbe, BrowserProbe>();
-builder.Services.AddSingleton(new ShellOptions { SignOutButton = typeof(SignOutButton), AdvancedSections = [typeof(PhonePairing)] });
+builder.Services.AddSingleton(new ShellOptions
+{
+    SignOutButton = typeof(SignOutButton),
+    AdvancedSections = [typeof(PhonePairing)],
+    // Only a real firewall captures anything; the demo has no packets to offer.
+    CaptureDownloadUrl = backendKind == "simulated" ? null : "/zero-trust/capture",
+});
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(sp => new PairedDevices(dataDirectory, sp.GetRequiredService<TimeProvider>()));
 
@@ -74,6 +80,7 @@ else
     builder.Services.AddSingleton(sp => (IUpdates)sp.GetRequiredService<IFirewallBackend>());
     builder.Services.AddSingleton(sp => (ITrafficWatch)sp.GetRequiredService<IFirewallBackend>());
     builder.Services.AddSingleton(sp => (IDnsControl)sp.GetRequiredService<IFirewallBackend>());
+    builder.Services.AddSingleton(sp => (IHeldCapture)sp.GetRequiredService<IFirewallBackend>());
 }
 
 var app = builder.Build();
@@ -133,6 +140,11 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapGet("/api/whoami", (HttpContext context) =>
     Results.Text(context.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? ""));
+// What devices waiting for approval sent, for Wireshark. Behind the sign-in like every page.
+app.MapGet("/zero-trust/capture", async (IServiceProvider services, CancellationToken ct) =>
+    services.GetService<IHeldCapture>() is { } capture && await capture.GetHeldCaptureAsync(ct) is { } zip
+        ? Results.File(zip, "application/zip", $"palisade-waiting-devices-{DateTime.Now:yyyy-MM-dd-HHmm}.zip")
+        : Results.Text("Nothing has been captured yet: no device waiting for approval has sent anything.", statusCode: StatusCodes.Status404NotFound));
 app.MapPost("/logout", async (HttpContext context) =>
 {
     await context.SignOutAsync();

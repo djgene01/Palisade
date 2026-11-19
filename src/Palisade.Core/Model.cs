@@ -44,6 +44,11 @@ public sealed class FirewallConfig
     public List<DeviceAccess> Access { get; set; } = [];
     /// <summary>Names the owner gave to devices. Only ever shown on screen, never written into a system file.</summary>
     public List<DeviceName> Names { get; set; } = [];
+    /// <summary>
+    /// Zero Trust Mode and its lists. Owned by the engine: a full save keeps whatever the engine holds, so a
+    /// screen with an older copy can never switch the mode off or undo an approval made elsewhere.
+    /// </summary>
+    public ZeroTrustSettings ZeroTrust { get; set; } = new();
 
     public FirewallConfig Clone() =>
         JsonSerializer.Deserialize<FirewallConfig>(JsonSerializer.Serialize(this, PalisadeJson.Options), PalisadeJson.Options)!;
@@ -158,6 +163,8 @@ public sealed class SystemStatus
     public int? PendingSecondsLeft { get; set; }
     /// <summary>Devices caught trying to reach a connection-sharing service in the last week, newest first.</summary>
     public List<RelaySighting> RelayDevices { get; set; } = [];
+    /// <summary>With Zero Trust on: devices waiting for approval, and what they tried. Newest first.</summary>
+    public List<HeldDevice> HeldDevices { get; set; } = [];
 }
 
 public sealed record DhcpLease(DateTimeOffset Expires, string Mac, string Address, string? Hostname);
@@ -190,6 +197,16 @@ public interface IFirewallBackend
     Task<WifiStatus> GetWifiAsync(CancellationToken ct = default);
     /// <summary>Joins another Wi-Fi network. If joining fails, the previous Wi-Fi settings are put back.</summary>
     Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default);
+    /// <summary>
+    /// Switches Zero Trust on or off, or moves its holding zone. Waits for confirmation like any other change.
+    /// Switching on approves every device the firewall already knows.
+    /// </summary>
+    Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default);
+    /// <summary>
+    /// Approves, blocks, removes or unblocks one device. Letting a device in (approve, unblock) takes effect at
+    /// once. Taking access away from an approved device waits for confirmation, since it could be this very one.
+    /// </summary>
+    Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default);
 }
 
 public static class NewId

@@ -86,12 +86,23 @@ public sealed class AppApiTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Fact]
-    public async Task The_web_pages_still_ask_for_the_password()
+    [Theory]
+    [InlineData("/")]
+    // Raw packets from devices waiting for approval: never without the password.
+    [InlineData("/zero-trust/capture")]
+    public async Task The_web_pages_still_ask_for_the_password(string path)
     {
-        var response = await _web.Http().GetAsync("/");
+        var response = await _web.Http().GetAsync(path);
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Equal("/setup", response.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task The_app_can_switch_zero_trust_and_change_approvals_only_with_its_token()
+    {
+        var anonymous = _web.Https();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/zerotrust", new ZeroTrustRequest(), WebInterface.Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/approvals", new ApprovalChange { Mac = "52:54:00:bb:00:66" }, WebInterface.Json)).StatusCode);
     }
 
     [Fact]

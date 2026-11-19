@@ -62,6 +62,8 @@ public static class AppApi
         api.MapPost("/names", (List<DeviceName> names, IFirewallBackend b, CancellationToken ct) => b.SetNamesAsync(names, ct));
         api.MapGet("/wifi", (IFirewallBackend b, CancellationToken ct) => b.GetWifiAsync(ct));
         api.MapPost("/wifi", (WifiRequest request, IFirewallBackend b, CancellationToken ct) => b.SetWifiAsync(request, ct));
+        api.MapPost("/zerotrust", (ZeroTrustRequest request, IFirewallBackend b, CancellationToken ct) => b.SetZeroTrustAsync(request, ct));
+        api.MapPost("/approvals", (ApprovalChange change, IFirewallBackend b, CancellationToken ct) => b.ChangeApprovalAsync(change, ct));
         api.MapPost("/dns/flush", (IDnsControl dns, CancellationToken ct) => dns.FlushDnsAsync(ct));
         api.MapPost("/watch", (WatchRequest request, ITrafficWatch watch, CancellationToken ct) => watch.WatchAsync(request, ct));
         api.MapGet("/update", (IUpdates u, CancellationToken ct) => u.GetUpdateAsync(ct));

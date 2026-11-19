@@ -36,6 +36,18 @@ public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, I
     public Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default) => PostAsync<ApplyResult>("names", names, Normal, ct);
     // Joining a Wi-Fi network is given 22 seconds by the agent before it steps back.
     public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default) => PostAsync<ApplyResult>("wifi", request, Change, ct);
+    // A firewall from before Zero Trust Mode does not know these two calls; it is told to update.
+    public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => NewerAsync(PostAsync<ApplyResult>("zerotrust", request, Change, ct));
+    public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => NewerAsync(PostAsync<ApplyResult>("approvals", change, Change, ct));
+
+    private static async Task<ApplyResult> NewerAsync(Task<ApplyResult> call)
+    {
+        try { return await call; }
+        catch (FirewallException ex) when (ex.Message.Contains("(404", StringComparison.Ordinal))
+        {
+            throw new FirewallException("Zero Trust Mode needs a newer firewall. Update it from its Advanced page, then try again.", ex);
+        }
+    }
     public Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default) => PostAsync<ApplyResult>("dns/flush", null, Normal, ct);
     public Task<WatchReport> WatchAsync(WatchRequest request, CancellationToken ct = default) =>
         PostAsync<WatchReport>("watch", request, TimeSpan.FromSeconds(Math.Max(request.Seconds, 0)) + Normal, ct);

@@ -178,6 +178,38 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
         return [];
     }
 
+    /// <summary>Who made a device, when its hardware address tells, or empty.</summary>
+    public string MakerOf(string mac) => makers.Find(mac) ?? "";
+
+    /// <summary>Devices waiting for approval while Zero Trust is on, newest first.</summary>
+    public IReadOnlyList<HeldDevice> Waiting => Config?.ZeroTrust.Enabled == true ? Status?.HeldDevices ?? [] : [];
+
+    /// <summary>Switches Zero Trust on or off. Like other changes it goes live and waits for confirmation.</summary>
+    public Task<IReadOnlyList<ValidationIssue>> SetZeroTrustAsync(ZeroTrustRequest request) =>
+        RunApprovalAsync(() => backend.SetZeroTrustAsync(request));
+
+    /// <summary>
+    /// Approves, blocks, removes or unblocks one device. Letting one in is immediate; taking access away
+    /// from an approved device waits for confirmation, which the page frame then looks after.
+    /// </summary>
+    public Task<IReadOnlyList<ValidationIssue>> ChangeApprovalAsync(ApprovalAction action, string mac, string name = "") =>
+        RunApprovalAsync(() => backend.ChangeApprovalAsync(new ApprovalChange { Action = action, Mac = mac, Name = name }));
+
+    private async Task<IReadOnlyList<ValidationIssue>> RunApprovalAsync(Func<Task<ApplyResult>> call)
+    {
+        ApplyResult result;
+        try { result = await call(); }
+        catch (Exception ex)
+        {
+            return [new("", Problem.Explain(ex, "The firewall service is not answering, so nothing was changed.", nothingChanged: true))];
+        }
+        if (!result.Ok) return result.Issues;
+        // Reload from the firewall: it decides the lists, including who was approved when the mode came on.
+        await LoadAsync();
+        if (result.ConfirmWithinSeconds > 0) ApplyStarted?.Invoke();
+        return [];
+    }
+
     public Task ConfirmAsync() => backend.ConfirmAsync();
 
     public async Task RevertAsync()
@@ -197,7 +229,8 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
     {
         if (Config is null) return [];
         var devices = new List<Device>();
-        foreach (var lease in Leases)
+        // A device in the holding zone is waiting for approval, not one of the household's: it is listed there instead.
+        foreach (var lease in Leases.Where(l => !ZeroTrustPlan.InHoldingZone(Config.ZeroTrust, l.Address)))
         {
             var reservation = Config.Dhcp.Reservations.FirstOrDefault(r => r.Mac == lease.Mac);
             devices.Add(new Device(reservation?.Name ?? lease.Hostname ?? "Unnamed device", lease.Address, lease.Mac, true, reservation,

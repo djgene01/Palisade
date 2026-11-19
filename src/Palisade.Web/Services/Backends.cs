@@ -5,7 +5,7 @@ using Palisade.Core;
 namespace Palisade.Web.Services;
 
 /// <summary>Talks to the root agent over its Unix socket. This is the web UI's only route to the system.</summary>
-public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IDisposable
+public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IHeldCapture, IDisposable
 {
     public async Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default)
     {
@@ -84,6 +84,27 @@ public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDn
         using var response = await _http.PostAsJsonAsync("wifi", request, PalisadeJson.Options, ct);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("zerotrust", request, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("approvals", change, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<byte[]?> GetHeldCaptureAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.GetAsync("held/capture", ct);
+        response.EnsureSuccessStatusCode();
+        return response.StatusCode == System.Net.HttpStatusCode.NoContent ? null : await response.Content.ReadAsByteArrayAsync(ct);
     }
 
     public async Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default)

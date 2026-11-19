@@ -17,11 +17,12 @@ for part in agent web; do
     fi
 done
 
-echo "Installing nftables and dnsmasq..."
+echo "Installing nftables, dnsmasq and tcpdump..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 # libicu is what .NET uses for text handling; the package name carries a version number, so match it.
-apt-get install -y -q nftables dnsmasq iproute2 ca-certificates "$(apt-cache --names-only search '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
+# tcpdump records what devices waiting for approval send, while Zero Trust Mode is on.
+apt-get install -y -q nftables dnsmasq iproute2 ca-certificates tcpdump curl "$(apt-cache --names-only search '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
 
 # dnsmasq must stay quiet until Palisade has been set up, otherwise it would answer on every port.
 # On an upgrade it is already serving the home network, so leave it running.
@@ -43,7 +44,7 @@ if [ -f "$here/VERSION" ]; then cp "$here/VERSION" /opt/palisade/VERSION; else e
 chown -R root:root /opt/palisade
 chmod 755 /opt/palisade/agent/Palisade.Agent /opt/palisade/web/Palisade.Web
 
-install -m 644 "$here/palisade-agent.service" "$here/palisade-web.service" "$here/palisade-dns@.service" /etc/systemd/system/
+install -m 644 "$here/palisade-agent.service" "$here/palisade-web.service" "$here/palisade-dns@.service" "$here/palisade-capture.service" /etc/systemd/system/
 systemctl daemon-reload
 
 # nftables.service reloads the saved rules at every boot, before and without Palisade's own programs.

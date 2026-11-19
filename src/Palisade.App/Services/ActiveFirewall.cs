@@ -71,6 +71,8 @@ public sealed class ActiveFirewall(FirewallEngine demo) : IFirewallBackend, IUpd
     public Task<ApplyResult> SetNamesAsync(List<DeviceName> names, CancellationToken ct = default) => Backend.SetNamesAsync(names, ct);
     public Task<WifiStatus> GetWifiAsync(CancellationToken ct = default) => Backend.GetWifiAsync(ct);
     public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default) => Backend.SetWifiAsync(request, ct);
+    public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => Backend.SetZeroTrustAsync(request, ct);
+    public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => Backend.ChangeApprovalAsync(change, ct);
 
     public Task<UpdateStatus> GetUpdateAsync(CancellationToken ct = default) => Updates.GetUpdateAsync(ct);
     public Task<UpdateStatus> SetUpdateAsync(UpdateSettings settings, CancellationToken ct = default) => Updates.SetUpdateAsync(settings, ct);

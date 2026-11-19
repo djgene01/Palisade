@@ -1,0 +1,127 @@
+@inherits StatePage
+
+@* Zero Trust Mode on the Network page. It has its own save: switching it on or off waits for confirmation like
+   every change, and the firewall itself decides which devices are approved when it comes on. *@
+<section aria-labelledby="zerotrust-title" class="mt-12 max-w-2xl border-t border-line pt-8">
+    <h2 id="zerotrust-title" class="text-xl font-bold">Zero Trust Mode</h2>
+    <p class="mt-1 text-muted">
+        A device that joins your network gets nothing until you approve it, here on Devices or in the Palisade app.
+        Until then it waits in a holding zone that reaches nothing: not the internet, not your devices, not this firewall.
+        Everything it tries is recorded, so you can see what it was after before you decide.
+    </p>
+
+    @if (Zt.Enabled)
+    {
+        <div class="panel mt-4 border-ok p-4">
+            <p class="flex items-center gap-2 font-bold"><Icon Name="shield-check" Class="text-ok" />Zero Trust Mode is on</p>
+            <p class="mt-1">
+                @Fmt.Plural(Zt.Approved.Count, "device approved", "devices approved"),
+                <a href="/devices" class="font-semibold underline">@Fmt.Plural(State.Waiting.Count, "waiting", "waiting")</a>@(Zt.Blocked.Count > 0 ? $", {Fmt.Plural(Zt.Blocked.Count, "blocked", "blocked")}" : "").
+                Waiting devices are held at @ZeroTrustPlan.HoldingRange(Zt).
+            </p>
+            <button type="button" class="btn mt-3" disabled="@_busy" @onclick="() => _confirmOff = true">Switch off Zero Trust Mode</button>
+        </div>
+    }
+    else
+    {
+        <button type="button" class="btn btn-primary mt-4" disabled="@_busy" @onclick="OpenSwitchOn"><Icon Name="shield-check" />Switch on Zero Trust Mode</button>
+    }
+
+    <Problems Issues="Issues" />
+
+    <details class="mt-4">
+        <summary class="cursor-pointer font-semibold">What this can and can't do</summary>
+        <ul class="mt-2 list-disc space-y-2 pl-5 text-muted">
+            <li>It controls everything that passes through the firewall: the internet, your extra networks, and the firewall itself.</li>
+            <li>It can't stop two devices on the same switch or Wi-Fi talking to each other directly. A waiting device that sets an address by hand could reach a device next to it. Put devices you don't trust on a separate Wi-Fi network where you can.</li>
+            <li>A device is recognised by its hardware (MAC) address. That can be copied, and a phone that uses a "private Wi-Fi address" turns up as a new device whenever it changes it. Switch that off on the phone for your home Wi-Fi, or approve it again.</li>
+            <li>The firewall keeps the packets waiting devices send, up to 20 MB, so you can look at them in Wireshark. They stay on the firewall and are deleted when you switch the mode off.</li>
+        </ul>
+    </details>
+</section>
+
+<Modal Open="_confirmOn" Title="Switch on Zero Trust Mode" OnClose="() => _confirmOn = false">
+    <p>These devices are approved straight away, so nobody in the house loses the internet:</p>
+    <ul class="mt-2 max-h-56 list-disc overflow-y-auto pl-5" aria-label="Devices that will be approved">
+        @foreach (var name in _preview)
+        {
+            <li>@name</li>
+        }
+    </ul>
+    <p class="mt-2 text-sm text-muted">Plus any device the firewall has heard from in the last few minutes.</p>
+    <p class="mt-3 rounded-md border border-warn bg-warn-soft p-3">
+        Devices that are switched off or quiet right now, such as a camera or a printer, are not on this list. When they
+        next connect they will wait for approval, so keep this app or page at hand.
+    </p>
+
+    <details class="mt-4" open="@_advanced">
+        <summary class="cursor-pointer font-semibold">Holding zone settings</summary>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+                <label for="holding-address" class="field-label">Firewall's address in the holding zone</label>
+                <input id="holding-address" class="input" @bind="_address" inputmode="decimal" />
+            </div>
+            <div>
+                <label for="holding-size" class="field-label">Size</label>
+                <select id="holding-size" class="input" @bind="_prefix">
+                    <option value="24">/24 (151 waiting devices)</option>
+                    <option value="25">/25</option>
+                    <option value="26">/26</option>
+                    <option value="27">/27</option>
+                    <option value="28">/28</option>
+                </select>
+            </div>
+        </div>
+        <p class="field-hint">Any private range your network doesn't use. The suggestion suits nearly every home.</p>
+    </details>
+
+    <Problems Issues="Issues" />
+    <div class="mt-5 flex flex-wrap gap-2">
+        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="SwitchOnAsync">@(_busy ? "Switching on" : "Switch on")</button>
+        <button type="button" class="btn btn-quiet" @onclick="() => _confirmOn = false">Cancel</button>
+    </div>
+</Modal>
+
+<Modal Open="_confirmOff" Title="Switch off Zero Trust Mode" OnClose="() => _confirmOff = false">
+    <p>Every device will be able to use your network again, waiting ones included. Your approvals and blocks are kept for when you switch it back on.</p>
+    <div class="mt-5 flex flex-wrap gap-2">
+        <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="SwitchOffAsync">@(_busy ? "Switching off" : "Switch off")</button>
+        <button type="button" class="btn btn-quiet" @onclick="() => _confirmOff = false">Keep it on</button>
+    </div>
+</Modal>
+
+@code {
+    private ZeroTrustSettings Zt => Config.ZeroTrust;
+    private bool _busy, _confirmOn, _confirmOff, _advanced;
+    private string _address = "10.99.0.1";
+    private int _prefix = 24;
+    private List<string> _preview = [];
+
+    private void OpenSwitchOn()
+    {
+        Issues = [];
+        (_address, _prefix) = (Zt.HoldingAddress, Zt.HoldingPrefix);
+        // What the firewall will approve, as far as this page can tell; the firewall also adds what it hears on the wire.
+        var known = ZeroTrustPlan.KnownDevices(Config, State.Leases, [], DateTimeOffset.UtcNow);
+        var names = State.Devices().ToDictionary(d => d.Mac, d => d.Name);
+        _preview = [.. known.Select(k => names.GetValueOrDefault(k.Mac) is { Length: > 0 } n ? n : k.Name.Length > 0 ? k.Name : k.Mac).Order()];
+        _confirmOn = true;
+    }
+
+    private async Task SwitchOnAsync()
+    {
+        _busy = true;
+        Issues = await State.SetZeroTrustAsync(new ZeroTrustRequest { Enabled = true, HoldingAddress = _address.Trim(), HoldingPrefix = _prefix });
+        _busy = false;
+        if (Issues.Count == 0) _confirmOn = false;
+        else _advanced = Issues.Any(i => i.Field.StartsWith("ZeroTrust", StringComparison.Ordinal));
+    }
+
+    private async Task SwitchOffAsync()
+    {
+        _busy = true;
+        Issues = await State.SetZeroTrustAsync(new ZeroTrustRequest { Enabled = false, HoldingAddress = Zt.HoldingAddress, HoldingPrefix = Zt.HoldingPrefix });
+        _busy = false;
+        _confirmOff = false;
+    }
+}

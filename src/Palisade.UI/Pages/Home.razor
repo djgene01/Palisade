@@ -378,6 +378,8 @@
     private IEnumerable<(string Text, string Href, string Link)> Attention()
     {
         if (State.Status is not { } s) yield break;
+        if (Config.ZeroTrust.Enabled && State.Waiting.Count is > 0 and var waiting)
+            yield return ($"{Fmt.Plural(waiting, "device is", "devices are")} waiting for your approval. Until you decide, they can reach nothing.", "/devices", "Approve or block them on the Devices page");
         // A box that carries relay software keeps trying. One that stopped a day ago, or is already paused, needs no nagging.
         foreach (var device in State.Devices().Where(d => d.Relay is { } r && DateTimeOffset.UtcNow - r.LastSeen < TimeSpan.FromDays(1)))
         {
