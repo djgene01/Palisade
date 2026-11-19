@@ -66,6 +66,7 @@ public static class AppApi
         api.MapPost("/approvals", (ApprovalChange change, IFirewallBackend b, CancellationToken ct) => b.ChangeApprovalAsync(change, ct));
         api.MapPost("/dns/flush", (IDnsControl dns, CancellationToken ct) => dns.FlushDnsAsync(ct));
         api.MapPost("/watch", (WatchRequest request, ITrafficWatch watch, CancellationToken ct) => watch.WatchAsync(request, ct));
+        api.MapGet("/health", (HealthRange? range, ISystemHealth h, CancellationToken ct) => h.GetHealthAsync(range ?? HealthRange.Day, ct));
         api.MapGet("/update", (IUpdates u, CancellationToken ct) => u.GetUpdateAsync(ct));
         api.MapPost("/update/settings", (UpdateSettings settings, IUpdates u, CancellationToken ct) => u.SetUpdateAsync(settings, ct));
         api.MapPost("/update/check", (IUpdates u, CancellationToken ct) => u.CheckUpdateAsync(install: false, ct));

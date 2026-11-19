@@ -5,7 +5,7 @@ using Palisade.Core;
 namespace Palisade.Web.Services;
 
 /// <summary>Talks to the root agent over its Unix socket. This is the web UI's only route to the system.</summary>
-public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IHeldCapture, IDisposable
+public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IHeldCapture, ISystemHealth, IDisposable
 {
     public async Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default)
     {
@@ -99,6 +99,9 @@ public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDn
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
     }
+
+    public async Task<HealthReport> GetHealthAsync(HealthRange range, CancellationToken ct = default) =>
+        (await _http.GetFromJsonAsync<HealthReport>($"health?range={range}", PalisadeJson.Options, ct))!;
 
     public async Task<byte[]?> GetHeldCaptureAsync(CancellationToken ct = default)
     {

@@ -166,6 +166,59 @@ public sealed class SimulatedUpdates : IUpdates
     }
 }
 
+/// <summary>
+/// Stands in for the firewall machine's processor, memory and disk in the demo: a month of made-up history with
+/// a busy evening each day, a restart three days ago (a gap), and a disk that slowly fills.
+/// </summary>
+public sealed class SimulatedHealth : ISystemHealth
+{
+    private const long DiskTotal = 32_000_000_000, MemoryTotal = 4_000_000_000;
+    private readonly HealthHistory _history = new();
+    private readonly Random _random = new(7);
+    private DateTimeOffset _filledTo;
+
+    public SimulatedHealth() => _filledTo = Fill(DateTimeOffset.UtcNow - HealthHistory.CoarseKept, DateTimeOffset.UtcNow);
+
+    private DateTimeOffset Fill(DateTimeOffset from, DateTimeOffset to)
+    {
+        var restart = to - TimeSpan.FromDays(3);
+        for (var at = from; at <= to; at += TimeSpan.FromMinutes(1))
+        {
+            if (at > restart && at < restart + TimeSpan.FromMinutes(25)) continue;
+            var (cpu, memory, disk) = Reading(at);
+            _history.Record(at, cpu, memory, disk);
+        }
+        return to;
+    }
+
+    private (double Cpu, double Memory, double Disk) Reading(DateTimeOffset at)
+    {
+        var hour = at.ToLocalTime().TimeOfDay.TotalHours;
+        var evening = Math.Exp(-Math.Pow((hour - 20.5) / 2.2, 2));
+        var cpu = 4 + 18 * evening + _random.NextDouble() * 6 + (_random.Next(200) == 0 ? 55 : 0);
+        var memory = 31 + 6 * evening + _random.NextDouble() * 1.5;
+        var daysAgo = (DateTimeOffset.UtcNow - at).TotalDays;
+        var disk = 22.4 - daysAgo * 0.05;
+        return (Math.Min(cpu, 100), memory, disk);
+    }
+
+    public Task<HealthReport> GetHealthAsync(HealthRange range, CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        lock (_history)
+            if (now - _filledTo >= TimeSpan.FromMinutes(1)) _filledTo = Fill(_filledTo + TimeSpan.FromMinutes(1), now);
+        var (cpu, memory, disk) = Reading(now);
+        var report = _history.Report(range, now);
+        report.Now = new HealthNow
+        {
+            At = now, CpuPercent = Math.Round(cpu, 1), Cores = 4, Load = Math.Round(cpu / 25, 2),
+            MemoryUsed = (long)(MemoryTotal * memory / 100), MemoryTotal = MemoryTotal,
+            DiskUsed = (long)(DiskTotal * disk / 100), DiskTotal = DiskTotal, DiskPercent = Math.Round(disk, 1),
+        };
+        return Task.FromResult(report);
+    }
+}
+
 /// <summary>Stands in for a real watch in the demo, with a made-up list after a short wait.</summary>
 public sealed class SimulatedWatch : ITrafficWatch, IDnsControl
 {

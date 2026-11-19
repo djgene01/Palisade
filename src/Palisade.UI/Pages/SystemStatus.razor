@@ -1,0 +1,130 @@
+@page "/system"
+@inherits StatePage
+@using System.Globalization
+@inject ISystemHealth Health
+
+<PageTitle>System · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">System</h1>
+<p class="mt-2 max-w-2xl text-lg text-muted">How hard the firewall machine is working, and how full it is. Measured every 10 seconds.</p>
+
+@if (_report is { Problem.Length: > 0 } failed)
+{
+    <p class="panel mt-6 max-w-2xl p-4" role="status">@failed.Problem</p>
+}
+else if (_error is not null)
+{
+    <p class="panel mt-6 max-w-2xl border-danger p-4" role="alert">@_error</p>
+}
+else if (_report is null)
+{
+    <p class="mt-6 text-muted" role="status">Reading the firewall's processor, memory and disk.</p>
+}
+else
+{
+    var now = _report.Now;
+    <section aria-label="Right now" class="mt-6 grid gap-4 sm:grid-cols-3">
+        <HealthTile Title="Processor" Icon="gauge" Percent="now?.CpuPercent"
+              Detail="@(now is null ? "" : $"{Fmt.Plural(now.Cores, "core", "cores")} · load {now.Load.ToString("0.00", CultureInfo.InvariantCulture)}")"
+              Waiting="Measuring. The first reading takes 10 seconds." />
+        <HealthTile Title="Memory" Icon="memory" Percent="now?.MemoryPercent" Warn="80" Danger="90"
+              Detail="@(now is null ? "" : $"{Fmt.Bytes(now.MemoryUsed)} of {Fmt.Bytes(now.MemoryTotal)}")" />
+        <HealthTile Title="Disk" Icon="disk" Percent="now?.DiskPercent" Warn="80" Danger="90"
+              Detail="@(now is null ? "" : $"{Fmt.Bytes(now.DiskUsed)} of {Fmt.Bytes(now.DiskTotal)}")" />
+    </section>
+
+    @if (now is { DiskPercent: >= 90 })
+    {
+        <p class="panel mt-4 max-w-2xl border-danger p-4" role="alert">The disk is nearly full. When it is full, settings can't be saved and updates can't install. Free some space, for example with <code>apt-get clean</code> and <code>journalctl --vacuum-size=100M</code> on the machine.</p>
+    }
+
+    <div class="mt-8 flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-xl font-bold">History</h2>
+        <div role="group" aria-label="How far back" class="inline-flex rounded-lg border border-line p-1">
+            @foreach (var (range, label) in Ranges)
+            {
+                <button type="button" aria-pressed="@(range == _range ? "true" : "false")"
+                        class="@($"rounded-md px-3 py-1.5 text-sm font-semibold {(range == _range ? "bg-brand text-on-brand" : "text-muted hover:text-ink")}")"
+                        @onclick="() => ChooseAsync(range)">@label</button>
+            }
+        </div>
+    </div>
+
+    @if (_report.Points.Count == 0)
+    {
+        <p class="panel mt-4 p-4 text-muted" role="status">No history yet. The first point appears within a minute.</p>
+    }
+    else
+    {
+        <div class="mt-4 grid gap-4 xl:grid-cols-3">
+            <HealthChart Title="Processor" Report="_report" Value="p => p.Cpu" Peak="p => p.CpuPeak" Color="var(--down)" />
+            <HealthChart Title="Memory" Report="_report" Value="p => p.Memory" Color="var(--up)" />
+            <HealthChart Title="Disk" Report="_report" Value="p => p.Disk" Color="var(--brand)" />
+        </div>
+        @if (_report.Points[0].At > _report.From.ToUnixTimeSeconds() + _report.Step * 2)
+        {
+            <p class="mt-3 text-sm text-muted">History starts @HealthChart.Label(DateTimeOffset.FromUnixTimeSeconds(_report.Points[0].At), _range), when this version of Palisade first ran. Breaks in a line are times the firewall was off or restarting.</p>
+        }
+        else
+        {
+            <p class="mt-3 text-sm text-muted">Breaks in a line are times the firewall was off or restarting.</p>
+        }
+    }
+}
+
+@code {
+    private static readonly (HealthRange Range, string Label)[] Ranges =
+        [(HealthRange.Hour, "Hour"), (HealthRange.Day, "Day"), (HealthRange.Week, "Week"), (HealthRange.Month, "Month")];
+
+    private HealthRange _range = HealthRange.Day;
+    private HealthReport? _report;
+    private string? _error;
+    private readonly CancellationTokenSource _stop = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _ = RefreshAsync(_stop.Token);
+    }
+
+    private async Task ChooseAsync(HealthRange range)
+    {
+        _range = range;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _report = await Health.GetHealthAsync(_range, _stop.Token);
+            _error = null;
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            _error = Palisade.Core.Problem.Explain(ex, "The firewall's processor, memory and disk could not be read.");
+        }
+    }
+
+    private async Task RefreshAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await LoadAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    public override void Dispose()
+    {
+        _stop.Cancel();
+        _stop.Dispose();
+        base.Dispose();
+    }
+}
