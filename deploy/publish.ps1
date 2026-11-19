@@ -12,7 +12,7 @@ dotnet publish (Join-Path $root 'src\Palisade.Web') -c Release -r linux-x64 --se
 if ($LASTEXITCODE -ne 0) { throw 'Publishing the web interface failed.' }
 
 # Shell scripts and unit files must keep Unix line endings or Debian refuses to run them.
-foreach ($name in 'install.sh', 'palisade-agent.service', 'palisade-web.service', 'palisade-dns@.service', 'palisade-capture.service') {
+foreach ($name in 'install.sh', 'palisade-agent.service', 'palisade-web.service', 'palisade-dns@.service', 'palisade-capture.service', 'palisade-lease-name') {
     $text = [IO.File]::ReadAllText((Join-Path $PSScriptRoot $name)) -replace "`r`n", "`n"
     [IO.File]::WriteAllText((Join-Path $out $name), $text, [Text.UTF8Encoding]::new($false))
 }

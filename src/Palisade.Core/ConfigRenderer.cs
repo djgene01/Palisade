@@ -244,6 +244,10 @@ public static class ConfigRenderer
             foreach (var server in servers) L($"server={Address(server)}");
         }
         L($"local=/{FilterPlan.CheckName}/");
+        // Device names (grans-tablet.home.arpa) are answered here and never asked of the internet. dnsmasq watches the
+        // folder and picks up new and removed names by itself, without emptying its cache.
+        L($"local=/{NamePlan.Domain}/");
+        L($"hostsdir={NamePlan.Directory}");
         foreach (var site in c.Filter.BlockedSites) L($"local=/{Site(site)}/");
         // Relay names get an answer, but one that leads to the trap: the firewall then sees which device came knocking.
         if (c.Filter.BlockRelays)
@@ -285,6 +289,9 @@ public static class ConfigRenderer
         L(Header);
         L($"interface={Token(c.LanInterface)}");
         L("bind-dynamic");
+        // The machine's own hosts file is for the machine. Served to the network, a firewall whose own hostname is
+        // "palisade" would answer that name with 127.0.1.1 as well; names come from the names folder only.
+        L("no-hosts");
         LookupLines(c, c.Filter.Level, L);
         if (d.Enabled && c.ZeroTrust.Enabled)
         {
@@ -295,6 +302,7 @@ public static class ConfigRenderer
             var zt = c.ZeroTrust;
             var (first, last) = ZeroTrustPlan.HoldingPool(zt);
             L("dhcp-authoritative");
+            DhcpNameLines(L);
             L($"dhcp-hostsfile={ZeroTrustPlan.HostsFile}");
             L($"dhcp-range=tag:known,{Address(d.RangeStart)},{Address(d.RangeEnd)},{Ip4.MaskString(c.LanPrefix)},{d.LeaseHours.ToString(CultureInfo.InvariantCulture)}h");
             L($"dhcp-range=set:holding,tag:!known,{first},{last},{Ip4.MaskString(zt.HoldingPrefix)},{ZeroTrustPlan.HoldingLease}");
@@ -306,6 +314,7 @@ public static class ConfigRenderer
         else if (d.Enabled)
         {
             L("dhcp-authoritative");
+            DhcpNameLines(L);
             L($"dhcp-range={Address(d.RangeStart)},{Address(d.RangeEnd)},{Ip4.MaskString(c.LanPrefix)},{d.LeaseHours.ToString(CultureInfo.InvariantCulture)}h");
             L($"dhcp-option=option:router,{Address(c.LanAddress)}");
             L($"dhcp-option=option:dns-server,{Address(c.LanAddress)}");
@@ -325,8 +334,23 @@ public static class ConfigRenderer
          .. c.ExtraNetworks.Select(n => $"{Address(n.Address)}/{(n.Prefix is >= 16 and <= 30 ? n.Prefix : throw new InvalidOperationException("Unsafe network size in config.")).ToString(CultureInfo.InvariantCulture)}"),
          .. c.ZeroTrust.Enabled ? [$"{Address(c.ZeroTrust.HoldingAddress)}/{ZeroTrustPlan.HoldingRange(c.ZeroTrust).Split('/')[1]}"] : Array.Empty<string>()];
 
-    /// <summary>A fixed address as dnsmasq reads it, in its config or in a hosts file: hardware address, address, name.</summary>
-    internal static string HostEntry(Reservation r) => $"{Token(r.Mac)},{Address(r.Address)},{Token(r.Name)}";
+    /// <summary>
+    /// A fixed address as dnsmasq reads it, in its config or in a hosts file: hardware address and address. The name
+    /// is left out on purpose: Palisade's names file is the one place names come from, so two can never disagree.
+    /// </summary>
+    internal static string HostEntry(Reservation r) => $"{Token(r.Mac)},{Address(r.Address)}";
+
+    /// <summary>
+    /// Devices are told the home network's name, so "grans-tablet" alone works. What they call themselves is not
+    /// published: Palisade's names file is the only source of names. It is still learned, through the lease script,
+    /// which dnsmasq tells the name each device sent even when it ignores it.
+    /// </summary>
+    private static void DhcpNameLines(Action<string> L)
+    {
+        L($"dhcp-option=option:domain-name,{NamePlan.Domain}");
+        L("dhcp-ignore-names");
+        L($"dhcp-script={NamePlan.LeaseScript}");
+    }
 
     // The validator already rejects unsafe input. These re-check at the point of output so a
     // config that skipped validation can never smuggle syntax into a root-owned file.

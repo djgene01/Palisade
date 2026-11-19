@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run by dnsmasq for every address it hands out or renews: remembers what each device calls itself, so Palisade can
+# name it. dnsmasq passes the name a device sent in DNSMASQ_SUPPLIED_HOSTNAME. It is the device's own words, so it
+# is cut down to plain characters here and never run or used as a path.
+[ "$1" = add ] || [ "$1" = old ] || exit 0
+mac=$(printf '%s' "$2" | tr 'A-F' 'a-f' | tr -cd '0-9a-f:')
+case "$mac" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;; *) exit 0 ;; esac
+name=$(printf '%s' "${DNSMASQ_SUPPLIED_HOSTNAME:-}" | tr -cd 'A-Za-z0-9._ -' | cut -c1-63)
+[ -n "$name" ] || exit 0
+dir=/var/lib/palisade/hostnames
+mkdir -p "$dir"
+printf '%s\n' "$name" > "$dir/.$mac" && mv -f "$dir/.$mac" "$dir/$mac"
+exit 0

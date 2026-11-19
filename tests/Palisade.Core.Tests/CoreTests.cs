@@ -88,7 +88,9 @@ public class CoreTests
         Assert.Contains("dhcp-range=192.168.50.100,192.168.50.200,255.255.255.0,12h\n", text);
         Assert.Contains("dhcp-option=option:router,192.168.50.1\n", text);
         Assert.Contains("dhcp-option=option:dns-server,192.168.50.1\n", text);
-        Assert.Contains("dhcp-host=aa:bb:cc:dd:ee:01,192.168.50.10,nas\n", text);
+        Assert.Contains("dhcp-host=aa:bb:cc:dd:ee:01,192.168.50.10\n", text);
+        Assert.Contains("dhcp-option=option:domain-name,home.arpa\ndhcp-ignore-names\ndhcp-script=/opt/palisade/palisade-lease-name\n", text);
+        Assert.Contains("local=/home.arpa/\nhostsdir=/etc/palisade/names\n", text);
         Assert.Contains("server=1.1.1.1\n", text);
         Assert.DoesNotContain('\r', text);
 
