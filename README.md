@@ -32,6 +32,7 @@
 - [First-time setup](#first-time-setup)
 - [The companion app](#the-companion-app)
 - [Zero Trust Mode](#zero-trust-mode)
+- [Device names](#device-names)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
 - [Uninstalling](#uninstalling)
@@ -53,6 +54,7 @@
 **Runs the home network**
 - Hands out addresses (DHCP), with fixed addresses for chosen devices.
 - Answers name lookups (DNS). The *Flush DNS* button clears remembered answers.
+- Gives every device a name on the network, such as `grans-tablet.home.arpa`, so you can reach a printer, a NAS or a camera by name instead of by address. The firewall itself is `palisade.home.arpa`.
 - Extra address ranges on the same cable, for example cameras with fixed addresses, with or without internet access.
 - The internet side can be a cable or the machine's own Wi-Fi. A spare port can be a *maintenance port* that reaches only the firewall's page.
 
@@ -338,6 +340,26 @@ curl -s --unix-socket /run/palisade/agent.sock -X POST http://agent/config/confi
 
 ---
 
+## Device names
+
+Every device on your home network gets a name under `home.arpa`, the ending reserved for home networks. Choose a device on the **Devices** page to see its name, for example `grans-tablet.home.arpa`. Devices are told to look names up there, so `grans-tablet` on its own works too. The firewall's page opens at `http://palisade.home.arpa:8080`.
+
+A device is named, best first:
+
+1. after the name you gave it on the **Devices** page;
+2. otherwise after what the device calls itself, such as `pixel-7`;
+3. otherwise after its maker and the end of its hardware address, such as `samsung-3f2a`.
+
+How names behave:
+
+- **Duplicates:** a second device with the same name gets `-2`, a third `-3`.
+- **Keeping names:** a device keeps its name while it is away, and gives it up after three months unseen.
+- **Reserved names:** no device can take `palisade`, or the names programs look up by themselves to set themselves up, such as `wpad`.
+- **Fixed addresses:** a device with a fixed address always has its name, even while it is switched off.
+- **Zero Trust Mode:** waiting and blocked devices get no name.
+
+---
+
 ## Updating
 
 **From the web page.** Go to **Advanced → Palisade updates**. Press **Check now**, then **Install** when a new release is shown. Or switch on **Install new releases automatically**: the firewall then checks this repository's releases every night at about 3 o'clock and installs a new one by itself. Installing restarts Palisade for a few seconds. Your devices stay online and your settings are kept.
@@ -447,6 +469,8 @@ Every change follows the same path:
 | `/etc/dnsmasq.d/palisade.conf`, `/etc/palisade/dns/` | DHCP and DNS settings |
 | `/etc/network/interfaces.d/palisade-*` | Home network port, and the internet port or Wi-Fi when Palisade looks after them |
 | `/etc/sysctl.d/90-palisade.conf` | Turns on packet forwarding |
+| `/etc/palisade/names/` | Device names under home.arpa, read by the name server |
+| `/var/lib/palisade/names.json`, `/var/lib/palisade/hostnames/` | Which name each device has, and what each device calls itself |
 | `/etc/palisade/zt-hosts` | Zero Trust Mode: the approved and blocked devices, for DHCP |
 | `/var/lib/palisade/capture/` | Zero Trust Mode: packets from waiting devices (root only, deleted when the mode is switched off) |
 

@@ -111,11 +111,11 @@ public class ZeroTrustTests
         var c = On(Nas, Laptop);
         Assert.DoesNotContain("dhcp-host=", ConfigRenderer.Dnsmasq(c));
         var hosts = ZeroTrustPlan.HostsFileText(c).Split('\n');
-        Assert.Contains("aa:bb:cc:dd:ee:01,192.168.50.10,nas", hosts);
+        Assert.Contains("aa:bb:cc:dd:ee:01,192.168.50.10", hosts);
         Assert.Contains(Laptop, hosts);
         Assert.Single(hosts, l => l.StartsWith(Nas, StringComparison.Ordinal));
         // With the mode off, nothing changes: the fixed address stays in the main config.
-        Assert.Contains("dhcp-host=aa:bb:cc:dd:ee:01,192.168.50.10,nas\n", ConfigRenderer.Dnsmasq(Sample()));
+        Assert.Contains("dhcp-host=aa:bb:cc:dd:ee:01,192.168.50.10\n", ConfigRenderer.Dnsmasq(Sample()));
     }
 
     [Fact]

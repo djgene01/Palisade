@@ -165,6 +165,8 @@ public sealed class SystemStatus
     public List<RelaySighting> RelayDevices { get; set; } = [];
     /// <summary>With Zero Trust on: devices waiting for approval, and what they tried. Newest first.</summary>
     public List<HeldDevice> HeldDevices { get; set; } = [];
+    /// <summary>The name each device answers to on the home network, under home.arpa.</summary>
+    public List<DeviceDnsName> Names { get; set; } = [];
 }
 
 public sealed record DhcpLease(DateTimeOffset Expires, string Mac, string Address, string? Hostname);

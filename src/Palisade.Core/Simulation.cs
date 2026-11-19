@@ -7,6 +7,7 @@ namespace Palisade.Core;
 public sealed class SimulatedPlatform : ISystemPlatform
 {
     private readonly DateTimeOffset _started = DateTimeOffset.UtcNow;
+    private readonly NameBook _names = new();
     private readonly Random _random = new();
     private DateTimeOffset _lastSample = DateTimeOffset.UtcNow;
     private long _rx = 48_000_000, _tx = 9_000_000;
@@ -69,8 +70,12 @@ public sealed class SimulatedPlatform : ISystemPlatform
         _tx += (long)(seconds * _random.Next(8_000, 160_000));
 
         var lanAddresses = _applied is null ? new List<string>() : [$"{_applied.LanAddress}/{_applied.LanPrefix}"];
+        // Names as the real firewall gives them. The demo's leases are made up on the spot, so asking for them can't wait.
+        var candidates = _applied is null ? [] : NamePlan.Candidates(active, GetLeasesAsync(ct).GetAwaiter().GetResult(), _ => null, now);
+        lock (_names) _names.Assign(candidates, now);
         return Task.FromResult(new SystemStatus
         {
+            Names = [.. candidates.Select(c => new DeviceDnsName(c.Mac, _names.NameOf(c.Mac)!))],
             Hostname = "palisade-demo",
             // The demo's unnamed device plays the part of a box that carries relay software.
             RelayDevices = active.Filter.BlockRelays ? [new RelaySighting { Mac = "52:54:00:aa:00:04", Attempts = 212, LastSeen = now.AddMinutes(-3) }] : [],

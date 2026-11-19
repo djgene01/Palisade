@@ -42,6 +42,84 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         }
     }
 
+    // Names for every device, kept by hardware address. The config they come from is the newest one seen: applied,
+    // or passed in with a status request, which is how a rename (saved without an apply) reaches the names quickly.
+    private NameBook? _names;
+    private FirewallConfig? _namesConfig;
+    private List<DeviceDnsName> _currentNames = [];
+    private string NamesFile => Path.Combine(dataDirectory, "names.json");
+    // The web interface keeps who made each device here; root may read it, and it lets a nameless device be called "samsung-3f2a".
+    private static string MakersFile => Environment.GetEnvironmentVariable("PALISADE_WEB_DATA") is { Length: > 0 } web
+        ? Path.Combine(web, "makers.json") : "/var/lib/palisade-web/makers.json";
+
+    /// <summary>Names the devices on the home network and writes the file dnsmasq answers from, when anything changed.</summary>
+    private async Task RefreshNamesAsync(CancellationToken ct)
+    {
+        // Called from the loop, from status requests and from every change, possibly at once: one at a time.
+        await _namesGate.WaitAsync(ct);
+        try { await RefreshNamesLockedAsync(ct); }
+        finally { _namesGate.Release(); }
+    }
+
+    private readonly SemaphoreSlim _namesGate = new(1, 1);
+
+    private async Task RefreshNamesLockedAsync(CancellationToken ct)
+    {
+        if (_namesConfig is not { SetupComplete: true } config) return;
+        try
+        {
+            ForgetOldOwnNames();
+            _names ??= new NameBook(File.Exists(NamesFile)
+                ? System.Text.Json.JsonSerializer.Deserialize<List<SavedName>>(await File.ReadAllTextAsync(NamesFile, ct), PalisadeJson.Options) : null);
+            var makers = ReadMakers();
+            var candidates = NamePlan.Candidates(config, await GetLeasesAsync(ct), mac => Maker.Prefix(mac) is { } p && makers.TryGetValue(p, out var m) ? m : null, DateTimeOffset.UtcNow);
+            if (_names.Assign(candidates, DateTimeOffset.UtcNow))
+                await WriteAtomicAsync(NamesFile, System.Text.Json.JsonSerializer.Serialize(_names.Export(), PalisadeJson.Options), ct);
+            _currentNames = [.. candidates.Select(c => new DeviceDnsName(c.Mac, _names.NameOf(c.Mac)!))];
+            var text = NamePlan.HostsFileText(config.LanAddress, candidates.Select(c => (c.Address, _names.NameOf(c.Mac)!)));
+            // dnsmasq notices the new file by itself; rewriting an unchanged one would only make it reread.
+            if (ReadOrEmpty(NamePlan.HostsFile) != text) await WriteNamesAsync(text, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Could not update the device names: {Message}", ex.Message);
+            _names ??= new NameBook();
+        }
+    }
+
+    /// <summary>
+    /// Like every other file, written whole and then swapped in, but through a hidden file: dnsmasq reads every
+    /// file in the folder except hidden ones, and would otherwise take the half-way copy for a second list of names.
+    /// </summary>
+    private static async Task WriteNamesAsync(string text, CancellationToken ct)
+    {
+        Directory.CreateDirectory(NamePlan.Directory);
+        var temp = Path.Combine(NamePlan.Directory, ".hosts.palisade-tmp");
+        await File.WriteAllTextAsync(temp, text, ct);
+        File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        File.Move(temp, NamePlan.HostsFile, overwrite: true);
+    }
+
+    /// <summary>What a device called itself is forgotten with its name, after three months unseen, so the folder doesn't grow forever.</summary>
+    private static void ForgetOldOwnNames()
+    {
+        if (!Directory.Exists(NamePlan.SeenDirectory)) return;
+        foreach (var file in Directory.GetFiles(NamePlan.SeenDirectory))
+            if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > NameBook.Kept) File.Delete(file);
+    }
+
+    private static Dictionary<string, string> ReadMakers()
+    {
+        try
+        {
+            return File.Exists(MakersFile)
+                ? (System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(MakersFile)) ?? [])
+                    .ToDictionary(m => m.Key.ToLowerInvariant(), m => Maker.Clean(m.Value))
+                : [];
+        }
+        catch (Exception) { return []; }   // A damaged or half-written file only means no maker names this round.
+    }
+
     /// <summary>Adds what waiting devices tried since the last look. Called from the usage loop, every 15 seconds.</summary>
     private async Task NoteHeldAsync(CancellationToken ct)
     {
@@ -66,6 +144,8 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     public async Task SetApprovalsAsync(FirewallConfig live, CancellationToken ct)
     {
         _live = live.Clone();
+        _namesConfig = _live;
+        await RefreshNamesAsync(ct);
         if (!live.ZeroTrust.Enabled) return;
         // The address server first: the hosts file decides who gets a home address on the next request.
         await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(live), ct);
@@ -210,6 +290,8 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     public async Task<IReadOnlyList<string>> CheckAsync(FirewallConfig config, GeneratedFiles files, CancellationToken ct)
     {
         var problems = new List<string>();
+        // The name servers read the device names from this folder, and refuse to start without it.
+        Directory.CreateDirectory(NamePlan.Directory);
 
         // Applying replaces every address on the home network port. If that port is the one this machine
         // reaches the internet through, doing so would cut the machine off in a way undo cannot repair.
@@ -265,6 +347,12 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
     public async Task ApplyAsync(FirewallConfig config, GeneratedFiles files, CancellationToken ct)
     {
         _live = config.Clone();
+        _namesConfig = _live;
+        // The name servers refuse to start without the names folder. The check makes it too, but the apply at
+        // start-up (the first one after an update, say) has no check before it.
+        Directory.CreateDirectory(NamePlan.Directory);
+        // A device that lost its approval, or got a fixed address, is named (or unnamed) with the change itself.
+        await RefreshNamesAsync(ct);
         await WriteAtomicAsync(SysctlConf, files.Sysctl, ct);
         await MustRunAsync("sysctl", ["-q", "-p", SysctlConf], ct);
 
@@ -413,6 +501,13 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         status.DhcpRunning = (await RunAsync("systemctl", ["is-active", "--quiet", "dnsmasq"], ct)).ExitCode == 0;
         status.InternetReachable = await CheckInternetAsync(active, ct);
         status.RelayDevices = _relays?.Report() ?? [];
+        // A rename is saved without an apply; the status request carries it here, and the names follow within seconds.
+        if (_namesConfig is null || !ReferenceEquals(_namesConfig, active) && NamesDiffer(_namesConfig, active))
+        {
+            _namesConfig = active.Clone();
+            await RefreshNamesAsync(ct);
+        }
+        status.Names = _currentNames;
         // Decided devices drop out at once, without waiting for the next reading.
         var z = active.ZeroTrust;
         status.HeldDevices = z.Enabled
@@ -421,11 +516,42 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
         return status;
     }
 
+    private static bool NamesDiffer(FirewallConfig a, FirewallConfig b) =>
+        !a.Names.Select(n => (n.Mac, n.Name)).SequenceEqual(b.Names.Select(n => (n.Mac, n.Name)))
+        || !a.Dhcp.Reservations.Select(r => (r.Mac, r.Address, r.Name)).SequenceEqual(b.Dhcp.Reservations.Select(r => (r.Mac, r.Address, r.Name)))
+        || a.ZeroTrust.Enabled != b.ZeroTrust.Enabled
+        || !a.ZeroTrust.Approved.Select(x => x.Mac).SequenceEqual(b.ZeroTrust.Approved.Select(x => x.Mac))
+        || a.LanAddress != b.LanAddress;
+
     public async Task<IReadOnlyList<DhcpLease>> GetLeasesAsync(CancellationToken ct)
     {
         if (!File.Exists(LeaseFile)) return [];
         var now = DateTimeOffset.UtcNow;
-        return LeaseParser.Parse(await File.ReadAllTextAsync(LeaseFile, ct)).Where(l => l.Expires > now).ToList();
+        var leases = LeaseParser.Parse(await File.ReadAllTextAsync(LeaseFile, ct)).Where(l => l.Expires > now).ToList();
+        // dnsmasq no longer keeps what devices call themselves (Palisade names them); the lease script does.
+        return [.. leases.Select(l => l with { Hostname = SeenName(l) })];
+    }
+
+    /// <summary>
+    /// What a device calls itself, as the lease script last heard it. A name still in the lease file from before
+    /// the script existed is kept the same way, so an upgrade doesn't forget the names until every device renews.
+    /// </summary>
+    private static string? SeenName(DhcpLease lease)
+    {
+        if (!ConfigValidator.TryNormalizeMac(lease.Mac, out var mac)) return lease.Hostname;
+        var path = Path.Combine(NamePlan.SeenDirectory, mac);
+        try
+        {
+            if (File.Exists(path) && File.ReadAllText(path).Trim() is { Length: > 0 } seen) return seen;
+            if (lease.Hostname is { Length: > 0 } old)
+            {
+                Directory.CreateDirectory(NamePlan.SeenDirectory);
+                File.WriteAllText(path, old + "\n");
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return lease.Hostname;
     }
 
     /// <summary>Keeps the totals growing while nobody has the overview open. Started once by the host.</summary>
@@ -441,6 +567,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
                 await GetUsageAsync(ct);
                 await NoteRelaysAsync(ct);
                 await NoteHeldAsync(ct);
+                await RefreshNamesAsync(ct);
                 // Every five minutes: often enough that a power cut loses little, rare enough to spare the disk.
                 if (++ticks % 20 == 0) await SaveTotalsAsync(ct);
             }

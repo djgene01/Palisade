@@ -102,6 +102,7 @@
                     else
                     {
                         <span><strong class="text-ink">@chosen.Name</strong> · @(chosen.Address.Length > 0 ? $"{chosen.Address} · " : "")@chosen.Mac</span>
+                        @if (chosen.DnsName.Length > 0) { <span> · on your network as <span class="font-mono text-ink select-all">@chosen.DnsName</span></span> }
                         @if (chosen.Maker.Length > 0) { <span> · made by @chosen.Maker</span> }
                         else if (chosen.MadeUpAddress) { <span> · uses a private address, which hides who made it</span> }
                         @if (chosen.Relay is { } caught) { <span> · tried a connection-sharing service @Fmt.Plural((int)Math.Min(caught.Attempts, int.MaxValue), "time", "times"), last on @caught.LastSeen.ToLocalTime().ToString("d MMM 'at' HH:mm", CultureInfo.InvariantCulture)</span> }

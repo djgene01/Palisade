@@ -14,6 +14,8 @@ public sealed record Device(string Name, string Address, string Mac, bool Online
     public string Maker { get; init; } = "";
     /// <summary>True when the address is one the device invented for itself, which hides who made it.</summary>
     public bool MadeUpAddress { get; init; }
+    /// <summary>The name it answers to on the home network, such as grans-tablet.home.arpa. Empty when it has none (yet).</summary>
+    public string DnsName { get; init; } = "";
     /// <summary>True when neither the owner nor the device itself supplied a name.</summary>
     public bool Unnamed { get; init; }
     /// <summary>A guess at what the device is, used only to choose its picture.</summary>
@@ -255,6 +257,7 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
                 Relay = Status?.RelayDevices.FirstOrDefault(r => r.Mac == d.Mac),
                 Type = DeviceKind.Guess($"{given} {d.Name}", maker),
                 Maker = maker, MadeUpAddress = Core.Maker.IsMadeUp(d.Mac), Unnamed = unnamed,
+                DnsName = Status?.Names.FirstOrDefault(n => n.Mac == d.Mac)?.Name is { } dns ? $"{dns}.{NamePlan.Domain}" : "",
             };
         })];
     }
