@@ -289,8 +289,9 @@ public static class ConfigRenderer
         if (d.Enabled && c.ZeroTrust.Enabled)
         {
             // Approved devices are "known" (from the hosts file) and get a home address; everything else gets a
-            // short lease in the holding zone with no way out. A reservation also counts as known, so only
-            // approved devices keep theirs.
+            // short lease in the holding zone with no way out. Fixed addresses live in the hosts file too, on the
+            // approved device's own line: dnsmasq uses only one entry per device, and a second, bare one for the
+            // same device made it ignore the fixed address. Here, a reservation alone would also count as known.
             var zt = c.ZeroTrust;
             var (first, last) = ZeroTrustPlan.HoldingPool(zt);
             L("dhcp-authoritative");
@@ -301,8 +302,6 @@ public static class ConfigRenderer
             L($"dhcp-option=tag:!holding,option:dns-server,{Address(c.LanAddress)}");
             L("dhcp-option=tag:holding,option:router");
             L("dhcp-option=tag:holding,option:dns-server");
-            foreach (var r in d.Reservations.Where(r => zt.Approved.Any(a => a.Mac == r.Mac)))
-                L($"dhcp-host={Token(r.Mac)},{Address(r.Address)},{Token(r.Name)}");
         }
         else if (d.Enabled)
         {
@@ -311,7 +310,7 @@ public static class ConfigRenderer
             L($"dhcp-option=option:router,{Address(c.LanAddress)}");
             L($"dhcp-option=option:dns-server,{Address(c.LanAddress)}");
             foreach (var r in d.Reservations)
-                L($"dhcp-host={Token(r.Mac)},{Address(r.Address)},{Token(r.Name)}");
+                L($"dhcp-host={HostEntry(r)}");
         }
         return sb.ToString();
     }
@@ -325,6 +324,9 @@ public static class ConfigRenderer
         [$"{Address(c.LanAddress)}/{c.LanPrefix.ToString(CultureInfo.InvariantCulture)}",
          .. c.ExtraNetworks.Select(n => $"{Address(n.Address)}/{(n.Prefix is >= 16 and <= 30 ? n.Prefix : throw new InvalidOperationException("Unsafe network size in config.")).ToString(CultureInfo.InvariantCulture)}"),
          .. c.ZeroTrust.Enabled ? [$"{Address(c.ZeroTrust.HoldingAddress)}/{ZeroTrustPlan.HoldingRange(c.ZeroTrust).Split('/')[1]}"] : Array.Empty<string>()];
+
+    /// <summary>A fixed address as dnsmasq reads it, in its config or in a hosts file: hardware address, address, name.</summary>
+    internal static string HostEntry(Reservation r) => $"{Token(r.Mac)},{Address(r.Address)},{Token(r.Name)}";
 
     // The validator already rejects unsafe input. These re-check at the point of output so a
     // config that skipped validation can never smuggle syntax into a root-owned file.
