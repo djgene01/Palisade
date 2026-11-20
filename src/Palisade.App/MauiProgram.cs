@@ -40,6 +40,10 @@ public static class MauiProgram
         builder.Services.AddSingleton<IUpdates>(active);
         builder.Services.AddSingleton<ISystemHealth>(active);
         builder.Services.AddSingleton<ISpeedTest>(active);
+#if ANDROID
+        // The VPN built into the app, on Android only; elsewhere the VPN page shows what the firewall offers.
+        builder.Services.AddSingleton<IPhoneVpn>(new PhoneVpn(active));
+#endif
         builder.Services.AddSingleton<ITrafficWatch>(active);
         builder.Services.AddSingleton<IDnsControl>(active);
         builder.Services.AddSingleton<IConnectionProbe>(active);

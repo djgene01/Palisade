@@ -104,6 +104,7 @@ ns phone1 ping -c 2 -W 2 10.66.0.1 >/dev/null && pass "the tunnel comes up" || f
 ns phone1 ping -c 2 -W 2 $HOME_IP >/dev/null && pass "reaches the device at home" || fail "home device"
 [ "$(ns phone1 curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://192.168.50.1:8080/)" != 000 ] && pass "reaches this firewall's page" || fail "page"
 [ "$(ns phone1 dig +short +time=2 @10.66.0.1 palisade.home.arpa)" = 192.168.50.1 ] && pass "device names work" || fail "names"
+[ "$(ns phone1 curl -sk -o /dev/null -w '%{http_code}' --max-time 4 https://192.168.50.1:8443/api/v1/ping)" = 204 ] && pass "reaches the app's own port, so the app manages the firewall from anywhere" || fail "app port 8443"
 [ "$(ns phone1 timeout 4 nc 198.18.0.1 9000 </dev/null)" = hello ] && pass "reaches the internet through the home line" || fail "internet"
 tail -1 /tmp/seen-from | grep -qx 41.193.12.57 && pass "the internet sees the home line's address, not the tunnel's" || fail "seen from $(tail -1 /tmp/seen-from)"
 # Filtered: a lookup sent to some other server is answered by the firewall all the same.
@@ -116,6 +117,7 @@ echo "== Internet only (phone2)"
 ! ns phone2 ping -c 2 -W 2 $HOME_IP >/dev/null && pass "can't reach the device at home" || fail "REACHED HOME"
 [ "$(ns phone2 curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://192.168.50.1:8080/)" = 000 ] && [ "$(ns phone2 curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://10.66.0.1:8080/)" = 000 ] && pass "can't reach this firewall's page, on any address" || fail "REACHED THE PAGE"
 ! ns phone2 timeout 4 bash -c 'echo > /dev/tcp/10.66.0.1/22' 2>/dev/null && pass "can't reach SSH" || fail "REACHED SSH"
+[ "$(ns phone2 curl -sk -o /dev/null -w '%{http_code}' --max-time 4 https://192.168.50.1:8443/api/v1/ping)" = 000 ] && pass "can't reach the app's port either" || fail "REACHED THE APP PORT"
 ! ns phone2 ping -c 2 -W 2 10.66.0.2 >/dev/null && pass "can't reach another VPN device" || fail "reached phone1"
 # Pretending to be phone1 through its own tunnel: WireGuard drops it, since phone2 may only send as 10.66.0.3.
 ns phone2 ip addr add 10.66.0.2/32 dev wg0
@@ -147,6 +149,16 @@ A -X DELETE "http://agent/vpn/devices/$(echo "$d1" | jq -r .device.id)" | jq -e 
 ns phone1 wg set wg0 peer "$SERVER_PUB" endpoint 41.193.12.57:51820   # force a fresh handshake attempt
 ! ns phone1 ping -c 3 -W 2 $HOME_IP >/dev/null && pass "phone1 reaches nothing any more" || fail "PHONE1 STILL IN"
 ns phone2 ping -c 1 -W 2 10.66.0.1 >/dev/null && pass "the others carry on" || fail "others cut"
+
+echo "== A device that makes its own key, as the Palisade app does"
+own=$(wg genkey); ownpub=$(echo "$own" | wg pubkey)
+d5=$(post /vpn/devices "{\"name\":\"Own key\",\"access\":\"HomeAndInternet\",\"publicKey\":\"$ownpub\"}")
+echo "$d5" | jq -e --arg k "$ownpub" '.ok and .device.publicKey == $k and (.clientConfig | contains("PrivateKey") | not)' >/dev/null && pass "the firewall keeps the phone's key and sends settings without a private one" || fail "own key: $(echo "$d5" | jq -c '{ok, issues}')"
+! grep -rqF "$own" /var/lib/palisade /etc/palisade /etc/nftables.conf 2>/dev/null && pass "the phone's private key is nowhere on the firewall" || fail "PRIVATE KEY ON THE FIREWALL"
+echo "$d5" | jq -r .clientConfig | sed "s|^\[Interface\]$|[Interface]\nPrivateKey = $own|" | grep -v '^Address\|^DNS\|^#' | sed "s/^Endpoint = .*/Endpoint = 41.193.12.57:51820/" > /tmp/own.conf
+ns phone1 wg setconf wg0 /tmp/own.conf; ns phone1 ip addr flush dev wg0; ns phone1 ip addr add "$(echo "$d5" | jq -r .device.address)/32" dev wg0
+for net in 10.66.0.0/24 192.168.50.0/24; do ns phone1 ip route replace $net dev wg0; done   # re-addressing dropped them
+retry ns phone1 ping -c 1 -W 2 10.66.0.1 && retry ns phone1 ping -c 1 -W 2 $HOME_IP && pass "with its own key in, it connects and reaches home" || { fail "own-key tunnel"; echo "--- conf"; grep -v PrivateKey /tmp/own.conf; echo "--- phone"; ns phone1 wg show wg0; ns phone1 ip addr show wg0; ns phone1 ip route; echo "--- firewall"; wg show palisade-wg; }
 
 echo "== Switch off and back on"
 post /vpn '{"enabled":false,"port":51820,"address":"10.66.0.1","prefix":24,"duckDnsName":"palisadetest"}' | jq -e .ok >/dev/null; confirm
