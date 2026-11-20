@@ -409,6 +409,13 @@ To learn the second, Palisade asks Cloudflare's `https://1.1.1.1/cdn-cgi/trace` 
 
 The QR code holds the device's secret key and is shown once. Palisade keeps only the public half. Removing a device works at once and for good, even in the middle of another change: add it again for a new code.
 
+**In the Palisade app on Android**, there's no QR code or file. On the **VPN** page, under **This phone**:
+1. Press **Use the VPN on this phone**. The phone makes its own key, and the private half never leaves it: the firewall learns only the public half, over the app's paired connection.
+2. The first time, Android asks whether Palisade may set up a VPN. Choose **OK**.
+3. After that, **Connect** and **Disconnect** are one tap.
+
+The phone may reach home and the internet, so with the VPN on, the app manages your firewall from anywhere. A firewall older than v1.9 ignores the phone's key and sends one of its own over that same pinned connection, which works just as well.
+
 **What VPN devices get.** All their traffic goes through your home, so the network's content filter, your block rules and the connection-sharing block apply to them. VPN devices can't reach each other. Pauses, off times, site limits and per-device filter levels work by hardware address, which a tunnel doesn't have, so they don't apply to VPN devices yet.
 
 ---

@@ -97,6 +97,16 @@ The check proves the address, not that UDP gets in. The wizard's last step waits
   - whether WireGuard appears in Android's share sheet
   - the web's `AgentClient` VPN calls, since the tests drive the agent socket directly
 
+## Release 2: the VPN in the Android app (branch `app-vpn`)
+
+- **WireGuard's own Android tunnel library** (`com.wireguard.android:tunnel` 1.0.20230706, Apache-2.0) is bound from Maven Central with `AndroidMavenLibrary`. `GoBackend` runs it through Android's VPN service, declared in the manifest, not Always-on.
+- **The key is made on the phone** (`KeyPair`) and kept in SecureStorage, per firewall. Only the public half is sent (`VpnDeviceRequest.PublicKey`, firewall v1.9). A v1.8 firewall ignores it and sends its own key over the pinned connection, which the app also accepts.
+- **Connect** asks Android's permission once. It reports "on" only once home has answered through the tunnel; otherwise it switches back off within 15 seconds, so the internet keeps working. Failures name WireGuard's reason and go to logcat.
+- **The phone is added as "Home and internet",** so the app reaches the firewall's port 8443 through the tunnel, from anywhere (tested).
+- **Not yet:** connecting by itself away from home (next release).
+- **Known:** the native engine isn't built for 16 KB memory pages (XA0141). On such a phone the app says so, and the WireGuard app with a QR code still works.
+- **Only one VPN can be on at a time on Android:** connecting Palisade's switches off the WireGuard app's tunnel.
+
 ## Tests
 
 - **A second privileged container** plays the remote phone with real `wg`:

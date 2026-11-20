@@ -201,8 +201,15 @@ public sealed class RemoteTests : IDisposable
         Assert.Equal(VpnAccess.InternetOnly, Assert.Single(state.Config!.Vpn.Devices).Access);
         Assert.Empty((await state.GetVpnAsync()).Problem);
 
+        // The Palisade app makes its own key: only the public half travels, and the settings come back without a private one.
+        const string own = "q0A2bXn0eWQqW7J0yP1m2rBfV+0d7cNw1n9oKk5r2Gg=";
+        var mine = await state.AddVpnDeviceAsync(new VpnDeviceRequest { Name = "This phone", PublicKey = own });
+        Assert.True(mine.Ok, string.Join("; ", mine.Issues.Select(i => i.Message)));
+        Assert.Equal(own, mine.Device!.PublicKey);
+        Assert.DoesNotContain("PrivateKey", mine.ClientConfig);
+
         Assert.Empty(await state.RemoveVpnDeviceAsync(added.Device!.Id));
-        Assert.Empty(state.Config!.Vpn.Devices);
+        Assert.Equal("This phone", Assert.Single(state.Config!.Vpn.Devices).Name);
     }
 
     [Fact]

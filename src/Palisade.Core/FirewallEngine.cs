@@ -295,7 +295,15 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
             if (!live.Vpn.Enabled) return Failed("Switch the VPN on first.");
             if (live.Vpn.Devices.Any(d => d.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return Failed($"There is already a VPN device called {name}.");
             if (VpnPlan.NextAddress(live.Vpn) is not { } address) return Failed("The VPN network is full. Remove a device you no longer use.");
-            var (privateKey, publicKey) = await platform.NewVpnKeysAsync(ct);
+            // A device that made its own key sends only the public half; otherwise the firewall makes the pair.
+            string? privateKey = null;
+            string publicKey;
+            if (request.PublicKey is { Length: > 0 } own)
+            {
+                if (!VpnPlan.IsKey(own.Trim())) return Failed("That isn't a WireGuard key.");
+                publicKey = own.Trim();
+            }
+            else (privateKey, publicKey) = await platform.NewVpnKeysAsync(ct);
             var device = new VpnDevice { Name = name, PublicKey = publicKey, Address = address, Access = request.Access, CreatedAt = DateTimeOffset.UtcNow };
             var check = live.Clone();
             check.Vpn.Devices.Add(device);

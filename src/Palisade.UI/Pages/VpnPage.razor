@@ -3,6 +3,7 @@
 @using System.Globalization
 @using QRCoder
 @inject ShellOptions Shell
+@inject IServiceProvider Services
 
 <PageTitle>VPN · Palisade</PageTitle>
 
@@ -104,6 +105,54 @@ else
         </div>
     </section>
 
+    @if (_phone is { } phone)
+    {
+        @* The VPN built into this app: no QR code, no file. The key is made here and never leaves the phone. *@
+        var mine = phone.Status;
+        <section class="panel mt-6 max-w-2xl p-5" aria-labelledby="phone-title">
+            <h2 id="phone-title" class="flex items-center gap-2 text-xl font-bold"><Icon Name="phone" Class="text-brand" />This phone</h2>
+            @if (mine.State == PhoneVpnState.NotSetUp)
+            {
+                <p class="mt-1 text-muted">Use the VPN right here, with no other app: this phone makes its own key, which never leaves it, and joins your VPN with one tap. It may reach home and the internet, so you can also manage your firewall from anywhere.</p>
+                <div class="mt-3 flex flex-wrap items-end gap-2">
+                    <div class="min-w-0 flex-1 basis-48">
+                        <label for="phone-name" class="field-label">Name on the firewall</label>
+                        <input id="phone-name" class="input" @bind="_phoneName" maxlength="40" />
+                    </div>
+                    <button type="button" class="btn btn-primary" disabled="@(_busy || _phoneName.Trim().Length == 0)" @onclick="SetUpPhoneAsync"><Icon Name="key" />Use the VPN on this phone</button>
+                </div>
+            }
+            else
+            {
+                <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
+                    <p role="status" aria-live="polite">
+                        <strong>@mine.Name</strong> ·
+                        @(mine.State switch
+                        {
+                            PhoneVpnState.On => $"connected, {Fmt.Bytes(mine.ReceivedBytes)} in, {Fmt.Bytes(mine.SentBytes)} out",
+                            PhoneVpnState.Connecting => "connecting…",
+                            _ => "not connected",
+                        })
+                    </p>
+                    @if (mine.State == PhoneVpnState.On)
+                    {
+                        <button type="button" class="btn" disabled="@_busy" @onclick="DisconnectPhoneAsync">Disconnect</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-primary" disabled="@(_busy || mine.State == PhoneVpnState.Connecting)" @onclick="ConnectPhoneAsync"><Icon Name="key" />Connect</button>
+                    }
+                </div>
+                @if (mine.State != PhoneVpnState.On)
+                {
+                    <p class="mt-2 text-sm text-muted">The first time, Android asks whether Palisade may set up a VPN: choose OK. A key icon then shows at the top of the screen while it's connected.</p>
+                }
+            }
+            @if (mine.Problem.Length > 0) { <p class="mt-3 text-warn" role="alert">@mine.Problem</p> }
+            <Problems Issues="_phoneIssues" />
+        </section>
+    }
+
     @if (_added is { } added)
     {
         var peer = _status?.Peers.FirstOrDefault(p => p.DeviceId == added.Device!.Id);
@@ -168,7 +217,7 @@ else
                     var peer = _status?.Peers.FirstOrDefault(p => p.DeviceId == d.Id);
                     <li class="flex flex-wrap items-center justify-between gap-3 p-4">
                         <span class="min-w-0">
-                            <span class="block font-bold">@d.Name</span>
+                            <span class="block font-bold">@d.Name@(_phone?.Status.DeviceId == d.Id ? " (this phone)" : "")</span>
                             <span class="block text-sm text-muted">
                                 @(d.Access == VpnAccess.InternetOnly ? "Internet only" : "Home and internet") · @d.Address ·
                                 @(peer?.LastHandshake is { } seen ? $"last connected {Ago(seen)}{(peer.FromHome ? " (from home)" : "")}" : "never connected")
@@ -246,9 +295,19 @@ else
     private string _address = "10.66.0.1", _duckName = "", _duckToken = "", _newName = "";
     private VpnAccess _newAccess = VpnAccess.HomeAndInternet;
     private readonly CancellationTokenSource _stop = new();
+    private IPhoneVpn? _phone;
+    private string _phoneName = "";
+    private IReadOnlyList<ValidationIssue> _phoneIssues = [];
 
     protected override async Task OnInitializedAsync()
     {
+        _phone = Services.GetService(typeof(IPhoneVpn)) as IPhoneVpn;
+        if (_phone is not null)
+        {
+            _phoneName = _phone.DefaultName;
+            _phone.Changed += OnPhoneChanged;
+            await _phone.RefreshAsync(Config);
+        }
         (_port, _address, _prefix, _duckName) = (Vpn.Port, Vpn.Address, Vpn.Prefix, Vpn.DuckDnsName);
         _useDuck = Vpn.DuckDnsName.Length > 0 || Vpn.Devices.Count == 0;
         await LoadStatusAsync();
@@ -274,6 +333,7 @@ else
                 if (_added is null && DateTimeOffset.UtcNow - asked < TimeSpan.FromSeconds(30)) continue;
                 asked = DateTimeOffset.UtcNow;
                 if (Vpn.Enabled) await LoadStatusAsync();
+                if (_phone is not null) await _phone.RefreshAsync(Config);
                 await InvokeAsync(StateHasChanged);
             }
         }
@@ -339,6 +399,35 @@ else
         _busy = false;
     }
 
+    private void OnPhoneChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task SetUpPhoneAsync()
+    {
+        _busy = true;
+        _phoneIssues = await _phone!.SetUpAsync(_phoneName.Trim());
+        if (_phoneIssues.Count == 0)
+        {
+            await State.LoadAsync();
+            await _phone.ConnectAsync();
+            await LoadStatusAsync();
+        }
+        _busy = false;
+    }
+
+    private async Task ConnectPhoneAsync()
+    {
+        _busy = true;
+        await _phone!.ConnectAsync();
+        _busy = false;
+    }
+
+    private async Task DisconnectPhoneAsync()
+    {
+        _busy = true;
+        await _phone!.DisconnectAsync();
+        _busy = false;
+    }
+
     private static string Qr(string text)
     {
         using var data = QRCodeGenerator.GenerateQrCode(text, QRCodeGenerator.ECCLevel.M);
@@ -357,6 +446,7 @@ else
 
     public override void Dispose()
     {
+        if (_phone is not null) _phone.Changed -= OnPhoneChanged;
         _stop.Cancel();
         _stop.Dispose();
         base.Dispose();

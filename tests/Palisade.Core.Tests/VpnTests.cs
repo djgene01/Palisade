@@ -259,6 +259,29 @@ public class VpnTests
     }
 
     [Fact]
+    public async Task A_device_that_made_its_own_key_gets_settings_without_one_and_the_firewall_never_sees_it()
+    {
+        var (engine, platform, folder) = await SetUpAsync();
+        using var __ = engine;
+        Assert.True((await engine.SetVpnAsync(new VpnRequest { Enabled = true })).Ok);
+        await engine.ConfirmAsync();
+
+        var added = await engine.AddVpnDeviceAsync(new VpnDeviceRequest { Name = "Pixel", PublicKey = Key2 });
+        Assert.True(added.Ok, string.Join("; ", added.Issues.Select(i => i.Message)));
+        Assert.Equal(Key2, added.Device!.PublicKey);
+        Assert.DoesNotContain("PrivateKey", added.ClientConfig);
+        Assert.Contains("Address = 10.66.0.2/32\n", added.ClientConfig);
+
+        // The app puts its own key in; settings that already have one are left alone.
+        var mine = VpnPlan.WithPrivateKey(added.ClientConfig, "MINE=");
+        Assert.StartsWith("[Interface]\nPrivateKey = MINE=\n", mine);
+        Assert.Equal(mine, VpnPlan.WithPrivateKey(mine, "OTHER="));
+
+        Assert.False((await engine.AddVpnDeviceAsync(new VpnDeviceRequest { Name = "Bad", PublicKey = "not a key" })).Ok);
+        Assert.False((await engine.AddVpnDeviceAsync(new VpnDeviceRequest { Name = "Twin", PublicKey = Key2 })).Ok);
+    }
+
+    [Fact]
     public async Task A_save_from_a_screen_without_the_vpn_can_not_switch_it_off_or_forget_devices()
     {
         var (engine, _, _) = await SetUpAsync();

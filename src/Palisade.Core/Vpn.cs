@@ -53,6 +53,11 @@ public sealed class VpnDeviceRequest
 {
     public string Name { get; set; } = "";
     public VpnAccess Access { get; set; } = VpnAccess.HomeAndInternet;
+    /// <summary>
+    /// The device's own public key, when it made its key itself (the Palisade app does). The private half then never
+    /// leaves the device, and the settings that come back have no PrivateKey line. Empty: the firewall makes the key.
+    /// </summary>
+    public string PublicKey { get; set; } = "";
 }
 
 /// <summary>A device just added: its settings for the WireGuard app, shown this once. The private key in them is kept nowhere else.</summary>
@@ -279,11 +284,13 @@ public static class VpnPlan
     /// names work), and the firewall as the way to everything. All traffic goes through the tunnel, IPv6 included,
     /// so nothing leaks around it on a café's Wi-Fi.
     /// </summary>
-    public static string ClientConfig(VpnSettings v, VpnDevice device, string privateKey, string serverPublicKey, string endpointHost) =>
-        string.Join('\n',
+    public static string ClientConfig(VpnSettings v, VpnDevice device, string? privateKey, string serverPublicKey, string endpointHost) =>
+        string.Join('\n', new[]
+        {
             "[Interface]",
             $"# {device.Name}, from Palisade",
-            $"PrivateKey = {privateKey}",
+            // Left out when the device made its own key: it adds the line itself, and the firewall never had it.
+            privateKey is null ? null : $"PrivateKey = {privateKey}",
             $"Address = {device.Address}/32",
             $"DNS = {v.Address}, {NamePlan.Domain}",
             "",
@@ -292,7 +299,14 @@ public static class VpnPlan
             $"Endpoint = {endpointHost}:{v.Port.ToString(CultureInfo.InvariantCulture)}",
             "AllowedIPs = 0.0.0.0/0, ::/0",
             "PersistentKeepalive = 25",
-            "");
+            "",
+        }.OfType<string>());
+
+    /// <summary>Puts a device's own private key into settings that came without one.</summary>
+    public static string WithPrivateKey(string clientConfig, string privateKey) =>
+        clientConfig.Contains("\nPrivateKey = ", StringComparison.Ordinal)
+            ? clientConfig
+            : clientConfig.Replace("[Interface]\n", $"[Interface]\nPrivateKey = {privateKey}\n", StringComparison.Ordinal);
 
     /// <summary>A file name for the .conf download: WireGuard names the tunnel after it, so short and plain.</summary>
     public static string FileName(VpnDevice device)

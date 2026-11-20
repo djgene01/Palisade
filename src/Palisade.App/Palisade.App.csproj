@@ -57,4 +57,20 @@
         <PackageReference Include="Xamarin.AndroidX.Lifecycle.LiveData.Core.Ktx" Version="2.11.0.1" />
     </ItemGroup>
 
+    <!-- WireGuard's own Android tunnel library (Apache-2.0), bound from Maven Central: the same engine as the
+         official WireGuard app, for the VPN built into this app. -->
+    <!-- Its native engine isn't built for Android's 16 KB memory pages yet (XA0141). It loads on today's phones; on one
+         that uses 16 KB pages the VPN in the app reports that it can't start, and the WireGuard app's QR code still works. -->
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-android'">
+        <NoWarn>$(NoWarn);XA0141;BG8403</NoWarn>
+        <!-- Phones (arm64) and the emulator (x64) alike, whatever device happens to be attached while building. -->
+        <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-android'">
+        <AndroidMavenLibrary Include="com.wireguard.android:tunnel" Version="1.0.20230706" />
+        <!-- What it needs, at the versions MAUI already brings in. -->
+        <PackageReference Include="Xamarin.AndroidX.Annotation" Version="1.10.0.1" />
+        <PackageReference Include="Xamarin.AndroidX.Collection" Version="1.6.0.1" />
+    </ItemGroup>
+
 </Project>

@@ -26,6 +26,13 @@ public class MainActivity : MauiAppCompatActivity
         if (savedInstanceState is null) HandleIntent(Intent);
     }
 
+    // Android's answer to "may Palisade set up a VPN?", asked the first time the VPN is switched on in the app.
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        PhoneTunnel.ConsentAnswered(requestCode, resultCode);
+    }
+
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);

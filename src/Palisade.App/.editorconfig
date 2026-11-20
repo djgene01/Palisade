@@ -1,0 +1,7 @@
+# The C# that .NET generates for WireGuard's Android library (see the .csproj) follows Java's shapes, which C# flags.
+# Silenced for that generated code only: warnings in Palisade's own code still show.
+[obj/**/generated/**.cs]
+dotnet_diagnostic.CS0108.severity = none
+dotnet_diagnostic.CS0114.severity = none
+dotnet_diagnostic.CS8764.severity = none
+dotnet_diagnostic.XAOBS001.severity = none
