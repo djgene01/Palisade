@@ -34,6 +34,7 @@
 - [Zero Trust Mode](#zero-trust-mode)
 - [Device names](#device-names)
 - [Speed test](#speed-test)
+- [VPN](#vpn)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
 - [Uninstalling](#uninstalling)
@@ -73,6 +74,7 @@
 - Pause a device, or give it off times such as school nights.
 - **System**: the firewall machine's processor, memory and disk use right now, and over the last hour, day, week or month.
 - **Speed test**: download, upload and ping measured with Speedtest by Ookla, every 30 minutes or by hand, with a month of history.
+- **VPN**: reach home from anywhere with WireGuard, set up step by step, after Palisade has checked your line can be reached.
 - **Zero Trust Mode**: a new device gets nothing until you approve it, on the page or in the app. Until then it waits in a holding zone, and what it tries is recorded.
 
 **Looks after itself**
@@ -384,6 +386,33 @@ Palisade keeps the results for 31 days. It doesn't keep the public address or ha
 
 ---
 
+## VPN
+
+The **VPN** page sets up WireGuard, so a phone or laptop can join your home network from anywhere, through an encrypted tunnel. Devices use the official **WireGuard** app (Android, iPhone, Windows, Mac, Linux).
+
+**1. Check the line.** A VPN only works when the internet can reach your firewall. Palisade checks two things before it lets you switch on, and checks them again itself when you do:
+- the internet port holds a **public** address: not a private one, and not a shared carrier-grade NAT one (100.64.0.0/10)
+- the internet sees **that same address**, so nothing in between translates it
+
+To learn the second, Palisade asks Cloudflare's `https://1.1.1.1/cdn-cgi/trace` once, at the moment you check. If either check fails, the page says why and what to do. Typical fixes are putting another router in bridge mode, plugging the firewall straight into your fibre box (ONT), or asking your provider for a public IPv4 address.
+
+**2. Give your home a name.** Most providers change your address now and then. A free [DuckDNS](https://www.duckdns.org) name, such as `smithhome.duckdns.org`, follows it: Palisade updates it whenever the address changes, and every hour. The token stays on the firewall, readable by root alone, and is never shown again. If your address is fixed, devices can connect to it directly.
+
+**3. Switch on.** The firewall opens UDP port 51820, from the internet and from home, so a phone that keeps its VPN on at home still works. Like every change, switching on waits 60 seconds for confirmation. WireGuard doesn't answer anyone without a key.
+
+**4. Add a device.**
+1. Give it a name, and choose what it may reach:
+   - **Home and internet:** like being at home. Your devices, this firewall's page and SSH, device names, and the internet through your line.
+   - **Internet only:** safe browsing on café Wi-Fi, through your home line and filter, and nothing at home.
+2. Scan the QR code in the WireGuard app (**+** → **Scan from QR code**), or download the `.conf` file on a computer and import it. To add the phone you are holding, use **Share settings file** in the Palisade app and choose WireGuard, or save the file and use **+** → **Import from file** in WireGuard. The Palisade Windows app saves the file to Downloads. Delete it once imported.
+3. Switch Wi-Fi off on the phone and turn the tunnel on. The page shows **Connected from outside your home** when it works.
+
+The QR code holds the device's secret key and is shown once. Palisade keeps only the public half. Removing a device works at once and for good, even in the middle of another change: add it again for a new code.
+
+**What VPN devices get.** All their traffic goes through your home, so the network's content filter, your block rules and the connection-sharing block apply to them. VPN devices can't reach each other. Pauses, off times, site limits and per-device filter levels work by hardware address, which a tunnel doesn't have, so they don't apply to VPN devices yet.
+
+---
+
 ## Updating
 
 **From the web page.** Go to **Advanced → Palisade updates**. Press **Check now**, then **Install** when a new release is shown. Or switch on **Install new releases automatically**: the firewall then checks this repository's releases every night at about 3 o'clock and installs a new one by itself. Installing restarts Palisade for a few seconds. Your devices stay online and your settings are kept.
@@ -496,6 +525,8 @@ Every change follows the same path:
 | `/etc/palisade/names/` | Device names under home.arpa, read by the name server |
 | `/var/lib/palisade/names.json`, `/var/lib/palisade/hostnames/` | Which name each device has, and what each device calls itself |
 | `/var/lib/palisade/speed.json`, `/var/lib/palisade/speedtest/` | Speed test settings and results, and Ookla's program once fetched |
+| `/etc/palisade/wireguard/` | The VPN's own key (root only, kept when the VPN is switched off) |
+| `/var/lib/palisade/duckdns.json` | The DuckDNS token (root only) |
 | `/etc/palisade/zt-hosts` | Zero Trust Mode: the approved and blocked devices, for DHCP |
 | `/var/lib/palisade/capture/` | Zero Trust Mode: packets from waiting devices (root only, deleted when the mode is switched off) |
 
@@ -511,6 +542,8 @@ Every change follows the same path:
 - The companion app connects on port **8443** over HTTPS, using a certificate the firewall makes for itself on first start. Only the app's interface answers there, and that interface never answers over plain HTTP.
 - **Linking a phone.** You link a phone from **Advanced → Phones and tablets** while signed in. That shows a one-time code that lasts 5 minutes and is thrown away after 5 wrong guesses. The app checks the firewall's key fingerprint, then receives its own token. Only a hash of each token is stored, and you can remove any linked device there, which shuts it out at once.
 - From the home network port, the firewall itself accepts only the web interface (8080/8081), the app interface (8443), SSH (22), DHCP, DNS and ping. From the internet side it accepts only ping, unless you allow management from there.
+
+- **The VPN.** WireGuard ignores anyone without a key, and each device may send only from its own tunnel address, so a device can't pretend to be another. A new device's private key is made on the firewall and sent once, over the web page's plain HTTP on your home network, to draw the QR code. It is kept nowhere. Add devices from home, not over an untrusted network.
 
 Found a security problem? Please open an issue without the details and ask for a private contact, or use GitHub's private vulnerability reporting if it is enabled.
 

@@ -49,6 +49,7 @@ public sealed class FirewallConfig
     /// screen with an older copy can never switch the mode off or undo an approval made elsewhere.
     /// </summary>
     public ZeroTrustSettings ZeroTrust { get; set; } = new();
+    public VpnSettings Vpn { get; set; } = new();
 
     public FirewallConfig Clone() =>
         JsonSerializer.Deserialize<FirewallConfig>(JsonSerializer.Serialize(this, PalisadeJson.Options), PalisadeJson.Options)!;
@@ -209,6 +210,16 @@ public interface IFirewallBackend
     /// once. Taking access away from an approved device waits for confirmation, since it could be this very one.
     /// </summary>
     Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default);
+    /// <summary>The VPN's live state: the last line check, each device's tunnel, DuckDNS.</summary>
+    Task<VpnStatus> GetVpnAsync(CancellationToken ct = default);
+    /// <summary>Checks that the firewall holds a public address the internet sees as its own. Changes nothing.</summary>
+    Task<ReachabilityReport> CheckVpnAsync(CancellationToken ct = default);
+    /// <summary>Switches the VPN on or off, or changes its port, range or name. Switching on checks the line first. Waits for confirmation.</summary>
+    Task<ApplyResult> SetVpnAsync(VpnRequest request, CancellationToken ct = default);
+    /// <summary>Lets a new device in, at once, and returns its settings for the WireGuard app this one time.</summary>
+    Task<VpnDeviceResult> AddVpnDeviceAsync(VpnDeviceRequest request, CancellationToken ct = default);
+    /// <summary>Shuts a device out, at once and for good: a lost phone must not come back with an undo.</summary>
+    Task<ApplyResult> RemoveVpnDeviceAsync(string id, CancellationToken ct = default);
 }
 
 public static class NewId

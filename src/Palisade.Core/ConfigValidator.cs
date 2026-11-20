@@ -179,6 +179,7 @@ public static partial class ConfigValidator
         issues.AddRange(AccessPlan.Validate(c.Access));
         issues.AddRange(DeviceName.Validate(c.Names));
         issues.AddRange(ZeroTrustPlan.Validate(c));
+        issues.AddRange(VpnPlan.Validate(c));
         return issues;
     }
 

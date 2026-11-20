@@ -26,6 +26,20 @@ public interface ISystemPlatform
     Task SetApprovalsAsync(FirewallConfig live, CancellationToken ct);
     /// <summary>Hardware addresses the home network port has heard from lately, including devices with addresses set by hand.</summary>
     Task<IReadOnlyList<string>> GetNeighboursAsync(FirewallConfig live, CancellationToken ct);
+
+    // The VPN. Defaults let a test platform leave them out.
+    /// <summary>Compares the internet port's address with the one an outside service sees.</summary>
+    Task<ReachabilityReport> CheckReachabilityAsync(FirewallConfig live, CancellationToken ct) =>
+        Task.FromResult(VpnPlan.Check("", null, DateTimeOffset.UtcNow));
+    /// <summary>A new WireGuard key pair for a device: private, then public.</summary>
+    Task<(string Private, string Public)> NewVpnKeysAsync(CancellationToken ct) => throw new NotSupportedException("This system has no VPN.");
+    /// <summary>The firewall's own public key, made once and kept through every switch-off.</summary>
+    Task<string> GetVpnServerKeyAsync(CancellationToken ct) => throw new NotSupportedException("This system has no VPN.");
+    /// <summary>Makes the device list the live one, at once, without reloading the rules.</summary>
+    Task SetVpnPeersAsync(FirewallConfig live, CancellationToken ct) => Task.CompletedTask;
+    Task<VpnStatus> GetVpnStatusAsync(FirewallConfig live, CancellationToken ct) => Task.FromResult(new VpnStatus());
+    /// <summary>Keeps the DuckDNS token where only the firewall can read it. Null keeps it; empty removes it.</summary>
+    Task SetDuckDnsTokenAsync(string? token, CancellationToken ct) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -114,6 +128,8 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
             // Zero Trust is changed only through its own calls. An app or page from before it existed sends no
             // such section, and one with an older copy would undo approvals made since: neither may touch it.
             config.ZeroTrust = current.ZeroTrust;
+            // The same for the VPN: its devices and switch belong to their own calls.
+            config.Vpn = current.Vpn;
             return await ApplyLockedAsync(config, ct);
         }
         finally { _gate.Release(); }
@@ -229,6 +245,104 @@ public sealed class FirewallEngine(ISystemPlatform platform, string dataDirector
         {
             log?.Invoke($"Changing an approval failed: {ex.Message}");
             return ApplyResult.Failed($"The change could not be saved. ({ex.Message})");
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<VpnStatus> GetVpnAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try { return await platform.GetVpnStatusAsync(_pending ?? _active, ct); }
+        finally { _gate.Release(); }
+    }
+
+    public Task<ReachabilityReport> CheckVpnAsync(CancellationToken ct = default) => platform.CheckReachabilityAsync(_pending ?? _active, ct);
+
+    public async Task<ApplyResult> SetVpnAsync(VpnRequest request, CancellationToken ct = default)
+    {
+        if (request.DuckDnsToken is { Length: > 0 } token && !VpnPlan.IsDuckDnsToken(token.Trim()))
+            return ApplyResult.Failed([new ValidationIssue("Vpn.DuckDnsToken", "That isn't a DuckDNS token. Copy it from the top of duckdns.org after signing in.")]);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var config = (_pending ?? _active).Clone();
+            config.SetupComplete = true;
+            var turningOn = request.Enabled && !config.Vpn.Enabled;
+            var duck = request.DuckDnsName.Trim().ToLowerInvariant().Replace(VpnPlan.DuckDnsSuffix, "", StringComparison.Ordinal);
+            (config.Vpn.Enabled, config.Vpn.Port, config.Vpn.Address, config.Vpn.Prefix, config.Vpn.DuckDnsName) =
+                (request.Enabled, request.Port, request.Address.Trim(), request.Prefix, duck);
+            var issues = ConfigValidator.Validate(config);
+            if (issues.Count > 0) return ApplyResult.Failed(issues);
+            // The owner asked for proof before anything opens: the firewall must hold a public address of its own.
+            // Checked here, not only in the wizard, so no older page or app can switch the VPN on without it.
+            if (turningOn && await platform.CheckReachabilityAsync(config, ct) is { Outcome: not Reachability.Ready } report)
+                return ApplyResult.Failed([new ValidationIssue("Vpn.Reachability", report.Advice)]);
+            if (request.DuckDnsToken is not null) await platform.SetDuckDnsTokenAsync(request.DuckDnsToken.Trim(), ct);
+            return await ApplyLockedAsync(config, ct);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<VpnDeviceResult> AddVpnDeviceAsync(VpnDeviceRequest request, CancellationToken ct = default)
+    {
+        static VpnDeviceResult Failed(string message) => new() { Issues = [new("Vpn.Device", message)] };
+        var name = (request.Name ?? "").Trim();
+        if (!ConfigValidator.IsSafeName(name)) return Failed("Give the device a short name using letters, numbers and spaces, such as Annas phone.");
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var live = _pending ?? _active;
+            if (!live.Vpn.Enabled) return Failed("Switch the VPN on first.");
+            if (live.Vpn.Devices.Any(d => d.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return Failed($"There is already a VPN device called {name}.");
+            if (VpnPlan.NextAddress(live.Vpn) is not { } address) return Failed("The VPN network is full. Remove a device you no longer use.");
+            var (privateKey, publicKey) = await platform.NewVpnKeysAsync(ct);
+            var device = new VpnDevice { Name = name, PublicKey = publicKey, Address = address, Access = request.Access, CreatedAt = DateTimeOffset.UtcNow };
+            var check = live.Clone();
+            check.Vpn.Devices.Add(device);
+            if (VpnPlan.Validate(check) is { Count: > 0 } issues) return new VpnDeviceResult { Issues = issues };
+
+            // Where the device will connect, settled before anything changes. With a DuckDNS name, that name. Without
+            // one, the address itself, checked afresh: a remembered check may be from before the address changed, and
+            // is gone after a restart. Adding a device is rare, and settings with a wrong address are worse than a wait.
+            var host = live.Vpn.DuckDnsName.Length > 0 ? VpnPlan.EndpointHost(live.Vpn, "") : "";
+            if (host.Length == 0)
+            {
+                var report = await platform.CheckReachabilityAsync(live, ct);
+                if (report.Outcome != Reachability.Ready) return Failed($"The device was not added: {report.Advice}");
+                host = report.PortAddress;
+            }
+
+            // Letting a device in can't lock anyone out, so it takes effect at once, in both the live and the pending config.
+            _active.Vpn.Devices.Add(device);
+            if (_pending is not null && !ReferenceEquals(_pending, _active)) _pending.Vpn.Devices.Add(device);
+            if (_active.SetupComplete) await SaveActiveAsync(ct);
+            await platform.SetVpnPeersAsync(_pending ?? _active, ct);
+            return new VpnDeviceResult
+            {
+                Ok = true, Device = device, FileName = VpnPlan.FileName(device),
+                ClientConfig = VpnPlan.ClientConfig(live.Vpn, device, privateKey, await platform.GetVpnServerKeyAsync(ct), host),
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log?.Invoke($"Adding a VPN device failed: {ex.Message}");
+            return Failed($"The device could not be added. ({ex.Message})");
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<ApplyResult> RemoveVpnDeviceAsync(string id, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            // From the live and the pending config alike, and saved at once: an undo must never let a lost phone back in.
+            var removed = _active.Vpn.Devices.RemoveAll(d => d.Id == id);
+            if (_pending is not null) removed += _pending.Vpn.Devices.RemoveAll(d => d.Id == id);
+            if (removed == 0) return ApplyResult.Failed("That VPN device is already gone.");
+            if (_active.SetupComplete) await SaveActiveAsync(ct);
+            await platform.SetVpnPeersAsync(_pending ?? _active, ct);
+            return new ApplyResult { Ok = true };
         }
         finally { _gate.Release(); }
     }

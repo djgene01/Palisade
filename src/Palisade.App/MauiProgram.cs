@@ -56,9 +56,38 @@ public static class MauiProgram
             Subtitle = () => active.Name,
             ThemeChanged = SystemBars.Apply,
             CanBePaused = true,
+            ShareFile = ShareFileAsync,
+#if WINDOWS
+            ShareFileLabel = "Save settings file",
+            ShareFileHint = "Press Save settings file, then in WireGuard choose Import tunnel(s) from file and pick it in Downloads. Delete the file afterwards: it holds the device's key.",
+#else
+            ShareFileLabel = "Share settings file",
+            ShareFileHint = "Press Share settings file and choose WireGuard. If WireGuard isn't in the list, save the file to Files instead, then in WireGuard press + and Import from file.",
+#endif
         });
         builder.Services.AddPalisadeUi();
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// The phone's share sheet, for a VPN device's settings: they go to the WireGuard app from here. The file holds
+    /// a private key, so it lives in the app's own cache and is deleted again two minutes later.
+    /// </summary>
+    private static async Task ShareFileAsync(string fileName, string text)
+    {
+#if WINDOWS
+        // A share sheet can't reach WireGuard on Windows: save it where people look, and show it there.
+        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        Directory.CreateDirectory(folder);
+        var saved = Path.Combine(folder, Path.GetFileName(fileName));
+        await File.WriteAllTextAsync(saved, text);
+        System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{saved}\"");
+#else
+        var path = Path.Combine(FileSystem.CacheDirectory, Path.GetFileName(fileName));
+        await File.WriteAllTextAsync(path, text);
+        await MainThread.InvokeOnMainThreadAsync(() => Share.Default.RequestAsync(new ShareFileRequest { Title = "Add to WireGuard", File = new ShareFile(path) }));
+        _ = Task.Delay(TimeSpan.FromMinutes(2)).ContinueWith(_ => File.Delete(path), TaskScheduler.Default);
+#endif
     }
 }

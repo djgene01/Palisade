@@ -93,6 +93,37 @@ public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDn
         return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
     }
 
+    public async Task<VpnStatus> GetVpnAsync(CancellationToken ct = default) =>
+        (await _http.GetFromJsonAsync<VpnStatus>("vpn", PalisadeJson.Options, ct))!;
+
+    public async Task<ReachabilityReport> CheckVpnAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsync("vpn/check", null, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ReachabilityReport>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<ApplyResult> SetVpnAsync(VpnRequest request, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("vpn", request, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<VpnDeviceResult> AddVpnDeviceAsync(VpnDeviceRequest request, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("vpn/devices", request, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<VpnDeviceResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<ApplyResult> RemoveVpnDeviceAsync(string id, CancellationToken ct = default)
+    {
+        using var response = await _http.DeleteAsync($"vpn/devices/{Uri.EscapeDataString(id)}", ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
     public async Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default)
     {
         using var response = await _http.PostAsJsonAsync("approvals", change, PalisadeJson.Options, ct);

@@ -69,6 +69,11 @@ app.MapPost("/update/install", (CancellationToken ct) => updater.CheckUpdateAsyn
 app.MapPost("/config/apply", (FirewallConfig config, CancellationToken ct) => engine.ApplyAsync(config, ct));
 app.MapPost("/zerotrust", (ZeroTrustRequest request, CancellationToken ct) => engine.SetZeroTrustAsync(request, ct));
 app.MapPost("/approvals", (ApprovalChange change, CancellationToken ct) => engine.ChangeApprovalAsync(change, ct));
+app.MapGet("/vpn", (CancellationToken ct) => engine.GetVpnAsync(ct));
+app.MapPost("/vpn/check", (CancellationToken ct) => engine.CheckVpnAsync(ct));
+app.MapPost("/vpn", (VpnRequest request, CancellationToken ct) => engine.SetVpnAsync(request, ct));
+app.MapPost("/vpn/devices", (VpnDeviceRequest request, CancellationToken ct) => engine.AddVpnDeviceAsync(request, ct));
+app.MapDelete("/vpn/devices/{id}", (string id, CancellationToken ct) => engine.RemoveVpnDeviceAsync(id, ct));
 app.MapGet("/held/capture", async (CancellationToken ct) =>
     app.Services.GetRequiredService<ISystemPlatform>() is IHeldCapture capture && await capture.GetHeldCaptureAsync(ct) is { } zip
         ? Results.File(zip, "application/zip", "palisade-waiting-devices.zip")

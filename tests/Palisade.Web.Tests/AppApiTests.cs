@@ -104,6 +104,11 @@ public sealed class AppApiTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/zerotrust", new ZeroTrustRequest(), WebInterface.Json)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/health?range=Week")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/speed")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/vpn")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync("/api/v1/vpn/check", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/vpn", new VpnRequest(), WebInterface.Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/vpn/devices", new VpnDeviceRequest(), WebInterface.Json)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.DeleteAsync("/api/v1/vpn/devices/abc")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync("/api/v1/speed/run", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/speed/settings", new SpeedSettingsRequest(), WebInterface.Json)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/approvals", new ApprovalChange { Mac = "52:54:00:bb:00:66" }, WebInterface.Json)).StatusCode);

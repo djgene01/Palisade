@@ -176,6 +176,36 @@ public sealed class RemoteTests : IDisposable
     }
 
     [Fact]
+    public async Task The_vpn_is_checked_switched_on_and_a_device_added_and_removed_through_the_app_connection()
+    {
+        var link = await _firewall.LinkAsync();
+        using var backend = new RemoteBackend(link);
+        var state = new FirewallState(backend, new RemoteMakers(backend));
+        await state.LoadAsync();
+        await state.SaveAsync(c =>
+        {
+            c.WanInterface = state.Status!.Interfaces[0].Name;
+            c.LanInterface = state.Status.Interfaces[1].Name;
+        });
+        await state.ConfirmAsync();
+
+        Assert.Equal(Reachability.Ready, (await state.CheckVpnAsync()).Outcome);
+        Assert.Empty(await state.SetVpnAsync(new VpnRequest { Enabled = true }));
+        await state.ConfirmAsync();
+        await state.LoadAsync();
+        Assert.True(state.Config!.Vpn.Enabled);
+
+        var added = await state.AddVpnDeviceAsync(new VpnDeviceRequest { Name = "Annas phone", Access = VpnAccess.InternetOnly });
+        Assert.True(added.Ok, string.Join("; ", added.Issues.Select(i => i.Message)));
+        Assert.Contains("[Peer]", added.ClientConfig);
+        Assert.Equal(VpnAccess.InternetOnly, Assert.Single(state.Config!.Vpn.Devices).Access);
+        Assert.Empty((await state.GetVpnAsync()).Problem);
+
+        Assert.Empty(await state.RemoveVpnDeviceAsync(added.Device!.Id));
+        Assert.Empty(state.Config!.Vpn.Devices);
+    }
+
+    [Fact]
     public async Task Every_other_call_the_pages_make_works_through_the_app_connection()
     {
         using var backend = new RemoteBackend(await _firewall.LinkAsync());
@@ -290,6 +320,11 @@ public sealed class RemoteTests : IDisposable
         public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default) => Current.SetWifiAsync(request, ct);
         public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => Current.SetZeroTrustAsync(request, ct);
         public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => Current.ChangeApprovalAsync(change, ct);
+        public Task<VpnStatus> GetVpnAsync(CancellationToken ct = default) => Current.GetVpnAsync(ct);
+        public Task<ReachabilityReport> CheckVpnAsync(CancellationToken ct = default) => Current.CheckVpnAsync(ct);
+        public Task<ApplyResult> SetVpnAsync(VpnRequest request, CancellationToken ct = default) => Current.SetVpnAsync(request, ct);
+        public Task<VpnDeviceResult> AddVpnDeviceAsync(VpnDeviceRequest request, CancellationToken ct = default) => Current.AddVpnDeviceAsync(request, ct);
+        public Task<ApplyResult> RemoveVpnDeviceAsync(string id, CancellationToken ct = default) => Current.RemoveVpnDeviceAsync(id, ct);
     }
 
     [Fact]
