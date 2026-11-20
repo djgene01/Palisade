@@ -1,6 +1,6 @@
 # Runs one end-to-end test against the release package in ./release/palisade (build it with deploy/publish.ps1),
 # inside a privileged Debian container that boots systemd. Example:  pwsh tests/e2e/run.ps1 names
-param([Parameter(Mandatory)][ValidateSet('zero-trust', 'fixed-address', 'system', 'names', 'upgrade-names', 'speed', 'vpn')][string]$Test)
+param([Parameter(Mandatory)][ValidateSet('zero-trust', 'fixed-address', 'system', 'names', 'upgrade-names', 'speed', 'vpn', 'upgrade-vpn')][string]$Test)
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $release = Join-Path (Split-Path (Split-Path $here)) 'release\palisade'
