@@ -77,6 +77,11 @@ public sealed class ActiveFirewall(FirewallEngine demo) : IFirewallBackend, IUpd
     public Task<ApplyResult> SetWifiAsync(WifiRequest request, CancellationToken ct = default) => Backend.SetWifiAsync(request, ct);
     public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => Backend.SetZeroTrustAsync(request, ct);
     public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => Backend.ChangeApprovalAsync(change, ct);
+    public Task<VpnStatus> GetVpnAsync(CancellationToken ct = default) => Backend.GetVpnAsync(ct);
+    public Task<ReachabilityReport> CheckVpnAsync(CancellationToken ct = default) => Backend.CheckVpnAsync(ct);
+    public Task<ApplyResult> SetVpnAsync(VpnRequest request, CancellationToken ct = default) => Backend.SetVpnAsync(request, ct);
+    public Task<VpnDeviceResult> AddVpnDeviceAsync(VpnDeviceRequest request, CancellationToken ct = default) => Backend.AddVpnDeviceAsync(request, ct);
+    public Task<ApplyResult> RemoveVpnDeviceAsync(string id, CancellationToken ct = default) => Backend.RemoveVpnDeviceAsync(id, ct);
 
     public Task<SpeedStatus> GetSpeedAsync(CancellationToken ct = default) => Speed.GetSpeedAsync(ct);
     public Task<SpeedStatus> SetSpeedAsync(SpeedSettingsRequest request, CancellationToken ct = default) => Speed.SetSpeedAsync(request, ct);

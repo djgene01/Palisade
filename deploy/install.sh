@@ -17,12 +17,12 @@ for part in agent web; do
     fi
 done
 
-echo "Installing nftables, dnsmasq and tcpdump..."
+echo "Installing nftables, dnsmasq, tcpdump and WireGuard..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 # libicu is what .NET uses for text handling; the package name carries a version number, so match it.
 # tcpdump records what devices waiting for approval send, while Zero Trust Mode is on.
-apt-get install -y -q nftables dnsmasq iproute2 ca-certificates tcpdump curl "$(apt-cache --names-only search '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
+apt-get install -y -q nftables dnsmasq iproute2 ca-certificates tcpdump curl wireguard-tools "$(apt-cache --names-only search '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
 
 # dnsmasq must stay quiet until Palisade has been set up, otherwise it would answer on every port.
 # On an upgrade it is already serving the home network, so leave it running.

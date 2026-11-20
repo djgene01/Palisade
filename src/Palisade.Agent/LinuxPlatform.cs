@@ -7,7 +7,7 @@ namespace Palisade.Agent;
 
 /// <summary>Applies generated files to a Debian system. Runs as root; nothing else in the product does.</summary>
 [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch, IDnsControl, IHeldCapture
+public sealed partial class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> logger) : ISystemPlatform, ITrafficWatch, IDnsControl, IHeldCapture
 {
     public async Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default)
     {
@@ -369,6 +369,9 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
                 await MustRunAsync("ip", ["addr", "add", address, "dev", config.LanInterface], ct);
         }
 
+        // The tunnel too: there with its devices when the VPN is on, gone when it is off (an undo included).
+        await ApplyTunnelAsync(config, files.VpnPeers, ct);
+
         // The name servers start before the rules that point devices at them, so no lookup is sent to a port nobody answers yet.
         if (config.ZeroTrust.Enabled) await WriteAtomicAsync(ZeroTrustPlan.HostsFile, ZeroTrustPlan.HostsFileText(config), ct);
         await WriteAtomicAsync(DnsmasqConf, files.Dnsmasq, ct);
@@ -568,6 +571,7 @@ public sealed class LinuxPlatform(string dataDirectory, ILogger<LinuxPlatform> l
                 await NoteRelaysAsync(ct);
                 await NoteHeldAsync(ct);
                 await RefreshNamesAsync(ct);
+                await UpdateDuckDnsAsync(ct);
                 // Every five minutes: often enough that a power cut loses little, rare enough to spare the disk.
                 if (++ticks % 20 == 0) await SaveTotalsAsync(ct);
             }

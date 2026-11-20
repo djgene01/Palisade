@@ -1,0 +1,9 @@
+@* The number of a step in a guided setup, or a tick once it is done. *@
+<span class="@($"inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold {(Done ? "bg-ok text-on-brand" : "bg-sunk text-ink")}")" aria-hidden="true">
+    @if (Done) { <Icon Name="check" Class="h-4 w-4" /> } else { @Number }
+</span>
+
+@code {
+    [Parameter] public bool Done { get; set; }
+    [Parameter] public string Number { get; set; } = "";
+}

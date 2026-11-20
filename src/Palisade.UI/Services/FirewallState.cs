@@ -197,6 +197,28 @@ public sealed class FirewallState(IFirewallBackend backend, IMakerSource makers)
     public Task<IReadOnlyList<ValidationIssue>> ChangeApprovalAsync(ApprovalAction action, string mac, string name = "") =>
         RunApprovalAsync(() => backend.ChangeApprovalAsync(new ApprovalChange { Action = action, Mac = mac, Name = name }));
 
+    /// <summary>Switches the VPN on or off, or changes its settings. Waits for confirmation, which the page frame looks after.</summary>
+    public Task<IReadOnlyList<ValidationIssue>> SetVpnAsync(VpnRequest request) => RunApprovalAsync(() => backend.SetVpnAsync(request));
+
+    /// <summary>Shuts a VPN device out, at once and for good.</summary>
+    public Task<IReadOnlyList<ValidationIssue>> RemoveVpnDeviceAsync(string id) => RunApprovalAsync(() => backend.RemoveVpnDeviceAsync(id));
+
+    /// <summary>Lets a new device in and returns its settings for the WireGuard app, this once.</summary>
+    public async Task<VpnDeviceResult> AddVpnDeviceAsync(VpnDeviceRequest request)
+    {
+        VpnDeviceResult result;
+        try { result = await backend.AddVpnDeviceAsync(request); }
+        catch (Exception ex)
+        {
+            return new VpnDeviceResult { Issues = [new("", Problem.Explain(ex, "The firewall service is not answering, so no device was added.", nothingChanged: true))] };
+        }
+        if (result.Ok) await LoadAsync();
+        return result;
+    }
+
+    public Task<VpnStatus> GetVpnAsync() => backend.GetVpnAsync();
+    public Task<ReachabilityReport> CheckVpnAsync() => backend.CheckVpnAsync();
+
     private async Task<IReadOnlyList<ValidationIssue>> RunApprovalAsync(Func<Task<ApplyResult>> call)
     {
         ApplyResult result;

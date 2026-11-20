@@ -61,6 +61,36 @@ public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, I
         }
     }
 
+    private const string VpnTooOld = "The VPN needs a newer firewall. Update it from its Advanced page, then try again.";
+
+    public async Task<VpnStatus> GetVpnAsync(CancellationToken ct = default)
+    {
+        try { return await GetAsync<VpnStatus>("vpn", ct); }
+        catch (FirewallException ex) when (ex.Message.Contains("(404", StringComparison.Ordinal)) { return new VpnStatus { Problem = VpnTooOld }; }
+    }
+
+    public async Task<ReachabilityReport> CheckVpnAsync(CancellationToken ct = default)
+    {
+        try { return await PostAsync<ReachabilityReport>("vpn/check", null, Normal, ct); }
+        catch (FirewallException ex) when (ex.Message.Contains("(404", StringComparison.Ordinal)) { throw new FirewallException(VpnTooOld, ex); }
+    }
+
+    public Task<ApplyResult> SetVpnAsync(VpnRequest request, CancellationToken ct = default) => NewerVpnAsync(PostAsync<ApplyResult>("vpn", request, Change, ct));
+    public Task<ApplyResult> RemoveVpnDeviceAsync(string id, CancellationToken ct = default) =>
+        NewerVpnAsync(SendAsync<ApplyResult>(() => new HttpRequestMessage(HttpMethod.Delete, $"{AppContract.Prefix}/vpn/devices/{Uri.EscapeDataString(id)}"), Normal, ct));
+
+    public async Task<VpnDeviceResult> AddVpnDeviceAsync(VpnDeviceRequest request, CancellationToken ct = default)
+    {
+        try { return await PostAsync<VpnDeviceResult>("vpn/devices", request, Normal, ct); }
+        catch (FirewallException ex) when (ex.Message.Contains("(404", StringComparison.Ordinal)) { throw new FirewallException(VpnTooOld, ex); }
+    }
+
+    private static async Task<ApplyResult> NewerVpnAsync(Task<ApplyResult> call)
+    {
+        try { return await call; }
+        catch (FirewallException ex) when (ex.Message.Contains("(404", StringComparison.Ordinal)) { throw new FirewallException(VpnTooOld, ex); }
+    }
+
     private static async Task<ApplyResult> NewerAsync(Task<ApplyResult> call)
     {
         try { return await call; }

@@ -64,6 +64,11 @@ public static class AppApi
         api.MapPost("/wifi", (WifiRequest request, IFirewallBackend b, CancellationToken ct) => b.SetWifiAsync(request, ct));
         api.MapPost("/zerotrust", (ZeroTrustRequest request, IFirewallBackend b, CancellationToken ct) => b.SetZeroTrustAsync(request, ct));
         api.MapPost("/approvals", (ApprovalChange change, IFirewallBackend b, CancellationToken ct) => b.ChangeApprovalAsync(change, ct));
+        api.MapGet("/vpn", (IFirewallBackend b, CancellationToken ct) => b.GetVpnAsync(ct));
+        api.MapPost("/vpn/check", (IFirewallBackend b, CancellationToken ct) => b.CheckVpnAsync(ct));
+        api.MapPost("/vpn", (VpnRequest request, IFirewallBackend b, CancellationToken ct) => b.SetVpnAsync(request, ct));
+        api.MapPost("/vpn/devices", (VpnDeviceRequest request, IFirewallBackend b, CancellationToken ct) => b.AddVpnDeviceAsync(request, ct));
+        api.MapDelete("/vpn/devices/{id}", (string id, IFirewallBackend b, CancellationToken ct) => b.RemoveVpnDeviceAsync(id, ct));
         api.MapPost("/dns/flush", (IDnsControl dns, CancellationToken ct) => dns.FlushDnsAsync(ct));
         api.MapPost("/watch", (WatchRequest request, ITrafficWatch watch, CancellationToken ct) => watch.WatchAsync(request, ct));
         api.MapGet("/speed", (ISpeedTest s, CancellationToken ct) => s.GetSpeedAsync(ct));

@@ -9,6 +9,7 @@ Each script installs the real release package with `install.sh` in a Debian 13 c
 | `system.sh` | System page readings against `free`, `df` and `nproc`, and history across a restart |
 | `names.sh` | Device names: duplicates, reserved names, makers, a rename, a per-device filter level, Zero Trust, and a restart |
 | `upgrade-names.sh` | Upgrading a running v1.5.1 firewall keeps the names devices already gave |
+| `vpn.sh` | The VPN with real WireGuard on both ends: the line check (private, different, no answer, ready), home-and-internet and internet-only devices, a spoof, a phone at home, secrets nowhere, removal, off and on, the undo and a restart |
 | `speed.sh` | Speed tests with Ookla's real program: terms first, a test by hand, a scheduled one, a tampered program re-fetched, a restart. **Runs two real tests, about 200 MB of data.** |
 
 Run one:

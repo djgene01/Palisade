@@ -1,0 +1,364 @@
+@page "/vpn"
+@inherits StatePage
+@using System.Globalization
+@using QRCoder
+@inject ShellOptions Shell
+
+<PageTitle>VPN · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">VPN</h1>
+<p class="mt-2 max-w-2xl text-lg text-muted">Reach home from anywhere, safely: your phone or laptop joins your home network through an encrypted tunnel, with the official WireGuard app.</p>
+
+@if (_status?.Problem is { Length: > 0 } problem)
+{
+    <p class="panel mt-6 max-w-2xl p-4" role="status">@problem</p>
+}
+else if (!Vpn.Enabled)
+{
+    @* Not on yet: the guided setup. Each step opens when the one before it is done. *@
+    <ol class="mt-6 max-w-2xl space-y-4">
+        <li class="panel p-5" aria-labelledby="step1">
+            <h2 id="step1" class="flex items-center gap-2 text-lg font-bold"><StepMark Done="@(_reach?.Outcome == Reachability.Ready)" Number="1" />Check that your firewall can be reached</h2>
+            <p class="mt-1 text-muted">A VPN only works when the internet can reach your firewall: it needs a public address of its own, with no other router in front of it. Palisade checks this first.</p>
+            @if (_reach is { } r)
+            {
+                <p class="@($"mt-3 rounded-md border p-3 {(r.Outcome == Reachability.Ready ? "border-ok bg-ok-soft" : "border-warn bg-warn-soft")}")" role="status">
+                    <strong>@(r.Outcome == Reachability.Ready ? "Ready." : "Not ready yet.")</strong> @r.Advice
+                </p>
+            }
+            <button type="button" class="btn @(_reach?.Outcome == Reachability.Ready ? "" : "btn-primary") mt-3" disabled="@_busy" @onclick="CheckAsync">@(_busy && _step == 1 ? "Checking" : _reach is null ? "Check my line" : "Check again")</button>
+        </li>
+
+        <li class="panel p-5 @(_reach?.Outcome == Reachability.Ready ? "" : "opacity-60")" aria-labelledby="step2">
+            <h2 id="step2" class="flex items-center gap-2 text-lg font-bold"><StepMark Done="false" Number="2" />Give your home a name</h2>
+            @if (_reach?.Outcome == Reachability.Ready)
+            {
+                <p class="mt-1 text-muted">Phones connect to your home by name. If your provider ever changes your address (many do, after a power cut), a free DuckDNS name follows it, and your phones keep working.</p>
+                <fieldset class="mt-3 space-y-2">
+                    <legend class="sr-only">How phones find your home</legend>
+                    <label class="flex items-start gap-3"><input type="radio" name="naming" class="mt-1" checked="@_useDuck" @onchange="() => _useDuck = true" /><span><strong>A free DuckDNS name</strong> (recommended)</span></label>
+                    <label class="flex items-start gap-3"><input type="radio" name="naming" class="mt-1" checked="@(!_useDuck)" @onchange="() => _useDuck = false" /><span><strong>The address itself</strong>, @_reach.PortAddress. Only if your provider promised it never changes.</span></label>
+                </fieldset>
+                @if (_useDuck)
+                {
+                    <ol class="mt-3 list-decimal space-y-1 pl-5 text-sm">
+                        <li>Open <a class="font-semibold underline" href="https://www.duckdns.org" target="_blank" rel="noopener">duckdns.org</a> and sign in (with Google, GitHub or another account).</li>
+                        <li>Type a name in "sub domain", such as <span class="font-mono">smithhome</span>, and press <strong>add domain</strong>.</li>
+                        <li>Copy the <strong>token</strong> shown at the top of the page, and fill both in here.</li>
+                    </ol>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div>
+                            <label for="duck-name" class="field-label">DuckDNS name</label>
+                            <div class="flex items-center gap-1"><input id="duck-name" class="input" @bind="_duckName" autocomplete="off" placeholder="smithhome" /><span class="text-sm text-muted">.duckdns.org</span></div>
+                        </div>
+                        <div>
+                            <label for="duck-token" class="field-label">Token</label>
+                            <input id="duck-token" class="input" type="password" @bind="_duckToken" autocomplete="off" placeholder="@(HasToken ? "Kept from before: leave empty" : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")" />
+                        </div>
+                    </div>
+                    <p class="field-hint">The token stays on the firewall: it is never shown again or sent anywhere but DuckDNS.</p>
+                }
+            }
+        </li>
+
+        <li class="panel p-5 @(_reach?.Outcome == Reachability.Ready ? "" : "opacity-60")" aria-labelledby="step3">
+            <h2 id="step3" class="flex items-center gap-2 text-lg font-bold"><StepMark Done="false" Number="3" />Switch the VPN on</h2>
+            @if (_reach?.Outcome == Reachability.Ready)
+            {
+                <p class="mt-1 text-muted">The firewall opens UDP port @_port for WireGuard. Nothing gets in without a key you create in the next step, and WireGuard doesn't even answer anyone without one.</p>
+                <details class="mt-3">
+                    <summary class="cursor-pointer font-semibold">Port and VPN network</summary>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                        <div><label for="vpn-port" class="field-label">Port</label><input id="vpn-port" class="input" type="number" @bind="_port" /></div>
+                        <div><label for="vpn-address" class="field-label">Firewall's VPN address</label><input id="vpn-address" class="input" @bind="_address" inputmode="decimal" /></div>
+                        <div><label for="vpn-prefix" class="field-label">Size</label><select id="vpn-prefix" class="input" @bind="_prefix"><option value="24">/24</option><option value="25">/25</option><option value="26">/26</option><option value="27">/27</option><option value="28">/28</option></select></div>
+                    </div>
+                    <p class="field-hint">The suggestions suit nearly every home.</p>
+                </details>
+                <Problems Issues="Issues" />
+                <button type="button" class="btn btn-primary mt-4" disabled="@(_busy || (_useDuck && (_duckName.Trim().Length == 0 || (_duckToken.Trim().Length == 0 && !HasToken))))" @onclick="SwitchOnAsync"><Icon Name="key" />@(_busy && _step == 3 ? "Switching on" : "Switch on the VPN")</button>
+            }
+        </li>
+
+        <li class="panel p-5 opacity-60" aria-labelledby="step4">
+            <h2 id="step4" class="flex items-center gap-2 text-lg font-bold"><StepMark Done="false" Number="4" />Add your phone, and test it</h2>
+        </li>
+    </ol>
+}
+else
+{
+    <section class="panel mt-6 max-w-2xl border-ok p-5" aria-labelledby="on-title">
+        <h2 id="on-title" class="flex items-center gap-2 font-bold"><Icon Name="shield-check" Class="text-ok" />The VPN is on</h2>
+        <p class="mt-1">Phones connect to <span class="font-mono select-all">@Host:@Vpn.Port</span>.</p>
+        @if (_status?.Reachability is { } r)
+        {
+            <p class="mt-1 text-sm text-muted">Line checked @When(r.CheckedAt): @(r.Outcome == Reachability.Ready ? "reachable from the internet." : r.Advice)</p>
+        }
+        @if (Vpn.DuckDnsName.Length > 0)
+        {
+            <p class="mt-1 text-sm text-muted">@(_status?.DuckDnsResult is { Length: > 0 } duck ? duck : _status?.DuckDnsHasToken == false ? "DuckDNS has no token: phones can't find your home by name. Switch the VPN off and on to add it." : "DuckDNS is updated within a minute.")</p>
+        }
+        <div class="mt-3 flex flex-wrap gap-2">
+            <button type="button" class="btn" disabled="@_busy" @onclick="RecheckAsync">Check the line again</button>
+            <button type="button" class="btn btn-quiet" disabled="@_busy" @onclick="() => _confirmOff = true">Switch the VPN off</button>
+        </div>
+    </section>
+
+    @if (_added is { } added)
+    {
+        var peer = _status?.Peers.FirstOrDefault(p => p.DeviceId == added.Device!.Id);
+        <section class="panel mt-6 max-w-2xl border-brand p-5" aria-labelledby="added-title">
+            <h2 id="added-title" class="text-xl font-bold">Add @added.Device!.Name to WireGuard</h2>
+            <ol class="mt-2 list-decimal space-y-1 pl-5">
+                <li>Install the free <strong>WireGuard</strong> app (Google Play, App Store, or wireguard.com for computers).</li>
+                @if (Shell.ShareFile is not null)
+                {
+                    <li>@Shell.ShareFileHint Or scan the code with another device.</li>
+                }
+                else
+                {
+                    <li>In WireGuard, press <strong>+</strong>, then <strong>Scan from QR code</strong>, and point the phone at this code. On a computer, download the file and choose <strong>Import tunnel from file</strong>.</li>
+                }
+                <li>Switch the new tunnel on.</li>
+            </ol>
+            <img src="@added.QrImage" alt="QR code with the VPN settings for @added.Device.Name" class="mx-auto mt-4 h-64 w-64 rounded-lg bg-white p-2" />
+            <div class="mt-3 flex flex-wrap justify-center gap-2">
+                @if (Shell.ShareFile is { } share)
+                {
+                    <button type="button" class="btn btn-primary" @onclick="() => share(added.FileName, added.Config)">@Shell.ShareFileLabel</button>
+                }
+                else
+                {
+                    <a class="btn" href="@($"data:application/octet-stream;base64,{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(added.Config))}")" download="@added.FileName">Download @added.FileName</a>
+                }
+            </div>
+            <p class="mt-3 rounded-md border border-warn bg-warn-soft p-3 text-sm">This code holds the device's secret key and is shown only now. Don't share a screenshot of it. If it's lost, remove the device and add it again.</p>
+
+            <h3 class="mt-5 font-bold">Test it</h3>
+            <p class="text-muted">Switch Wi-Fi <strong>off</strong> on the phone, so it uses mobile data, then switch the tunnel on.</p>
+            <p class="mt-2 flex items-center gap-2 font-semibold" role="status" aria-live="polite">
+                @if (peer?.LastHandshake is null)
+                {
+                    <Icon Name="refresh" Class="text-muted" /><span>Waiting for @added.Device.Name to connect…</span>
+                }
+                else if (peer.FromHome)
+                {
+                    <Icon Name="bell" Class="text-warn" /><span>Connected, but from your home network. That doesn't prove it works from outside: switch Wi-Fi off on the phone and try again.</span>
+                }
+                else
+                {
+                    <Icon Name="check" Class="text-ok" /><span>Connected from outside your home. Your VPN works.</span>
+                }
+            </p>
+            <button type="button" class="btn btn-quiet mt-3" @onclick="() => _added = null">Done</button>
+        </section>
+    }
+
+    <section class="mt-6 max-w-2xl" aria-labelledby="devices-title">
+        <h2 id="devices-title" class="text-xl font-bold">Devices</h2>
+        @if (Vpn.Devices.Count == 0)
+        {
+            <p class="mt-1 text-muted">No device yet. Add your phone first.</p>
+        }
+        else
+        {
+            <ul class="panel mt-2 divide-y divide-line" aria-label="VPN devices">
+                @foreach (var d in Vpn.Devices.OrderBy(d => d.Name))
+                {
+                    var peer = _status?.Peers.FirstOrDefault(p => p.DeviceId == d.Id);
+                    <li class="flex flex-wrap items-center justify-between gap-3 p-4">
+                        <span class="min-w-0">
+                            <span class="block font-bold">@d.Name</span>
+                            <span class="block text-sm text-muted">
+                                @(d.Access == VpnAccess.InternetOnly ? "Internet only" : "Home and internet") · @d.Address ·
+                                @(peer?.LastHandshake is { } seen ? $"last connected {Ago(seen)}{(peer.FromHome ? " (from home)" : "")}" : "never connected")
+                            </span>
+                        </span>
+                        <button type="button" class="btn btn-quiet" disabled="@_busy" @onclick="() => _remove = d">Remove</button>
+                    </li>
+                }
+            </ul>
+        }
+
+        <form class="panel mt-4 p-5" @onsubmit="AddAsync" @onsubmit:preventDefault>
+            <h3 class="font-bold">Add a device</h3>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                    <label for="device-name" class="field-label">Name</label>
+                    <input id="device-name" class="input" @bind="_newName" maxlength="40" placeholder="Annas phone" />
+                </div>
+                <div>
+                    <label for="device-access" class="field-label">It may reach</label>
+                    <select id="device-access" class="input" @bind="_newAccess">
+                        <option value="@VpnAccess.HomeAndInternet">Home and internet</option>
+                        <option value="@VpnAccess.InternetOnly">Internet only</option>
+                    </select>
+                </div>
+            </div>
+            <p class="field-hint">"Home and internet" is like being at home: your devices, this firewall's page, and device names. "Internet only" is for safe browsing on a café's Wi-Fi, through your home line and filter.</p>
+            <Problems Issues="_addIssues" />
+            <button type="submit" class="btn btn-primary mt-3" disabled="@(_busy || _newName.Trim().Length == 0)"><Icon Name="key" />Add device</button>
+        </form>
+    </section>
+
+    <details class="mt-6 max-w-2xl">
+        <summary class="cursor-pointer font-semibold">What VPN devices get, and what they don't</summary>
+        <ul class="mt-2 list-disc space-y-2 pl-5 text-muted">
+            <li>All their traffic goes through your home: the network's content filter, your block rules and the connection-sharing block apply to them.</li>
+            <li>Pauses, off times, site limits and a filter level of their own work by hardware address, which a VPN device doesn't have, so they don't apply to VPN devices yet.</li>
+            <li>A device keeps its key until you remove it here. Removing is immediate and can't be undone: add it again for a new code.</li>
+            <li>VPN devices can't reach each other, only home and the internet.</li>
+        </ul>
+    </details>
+}
+
+<Modal Open="_remove is not null" Title="@($"Remove {_remove?.Name}")" OnClose="() => _remove = null">
+    <p>Its key stops working at once, wherever the device is. This can't be undone: to use it again, add it as a new device.</p>
+    <div class="mt-5 flex flex-wrap gap-2">
+        <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="RemoveAsync">Remove</button>
+        <button type="button" class="btn btn-quiet" @onclick="() => _remove = null">Keep it</button>
+    </div>
+</Modal>
+
+<Modal Open="_confirmOff" Title="Switch the VPN off" OnClose="() => _confirmOff = false">
+    <p>Every device loses its tunnel and the port closes. Your devices and their keys are kept, so they work again when you switch it back on.</p>
+    <Problems Issues="Issues" />
+    <div class="mt-5 flex flex-wrap gap-2">
+        <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="SwitchOffAsync">Switch off</button>
+        <button type="button" class="btn btn-quiet" @onclick="() => _confirmOff = false">Keep it on</button>
+    </div>
+</Modal>
+
+@code {
+    private sealed record Added(VpnDevice? Device, string Config, string FileName, string QrImage);
+
+    private VpnSettings Vpn => Config.Vpn;
+    private bool HasToken => _status?.DuckDnsHasToken == true;
+    private string Host => VpnPlan.EndpointHost(Vpn, _status?.Reachability?.PortAddress ?? "your public address");
+
+    private VpnStatus? _status;
+    private ReachabilityReport? _reach;
+    private Added? _added;
+    private VpnDevice? _remove;
+    private IReadOnlyList<ValidationIssue> _addIssues = [];
+    private bool _busy, _useDuck = true, _confirmOff;
+    private int _step, _port = VpnPlan.DefaultPort, _prefix = 24;
+    private string _address = "10.66.0.1", _duckName = "", _duckToken = "", _newName = "";
+    private VpnAccess _newAccess = VpnAccess.HomeAndInternet;
+    private readonly CancellationTokenSource _stop = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        (_port, _address, _prefix, _duckName) = (Vpn.Port, Vpn.Address, Vpn.Prefix, Vpn.DuckDnsName);
+        _useDuck = Vpn.DuckDnsName.Length > 0 || Vpn.Devices.Count == 0;
+        await LoadStatusAsync();
+        _reach = _status?.Reachability;
+        _ = PollAsync(_stop.Token);
+    }
+
+    private async Task LoadStatusAsync()
+    {
+        try { _status = await State.GetVpnAsync(); }
+        catch (Exception ex) { _status = new VpnStatus { Problem = Palisade.Core.Problem.Explain(ex, "The firewall did not answer about the VPN.") }; }
+    }
+
+    // Every 3 seconds while a new device is being tested, so its first connection shows at once; otherwise every 30.
+    private async Task PollAsync(CancellationToken ct)
+    {
+        var asked = DateTimeOffset.UtcNow;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), ct);
+                if (_added is null && DateTimeOffset.UtcNow - asked < TimeSpan.FromSeconds(30)) continue;
+                asked = DateTimeOffset.UtcNow;
+                if (Vpn.Enabled) await LoadStatusAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task CheckAsync()
+    {
+        (_busy, _step) = (true, 1);
+        try { _reach = await State.CheckVpnAsync(); }
+        catch (Exception ex) { _reach = null; Issues = [new("", Palisade.Core.Problem.Explain(ex, "The firewall could not check the line."))]; }
+        _busy = false;
+    }
+
+    private async Task RecheckAsync()
+    {
+        await CheckAsync();
+        await LoadStatusAsync();
+    }
+
+    private async Task SwitchOnAsync()
+    {
+        (_busy, _step) = (true, 3);
+        Issues = await State.SetVpnAsync(new VpnRequest
+        {
+            Enabled = true, Port = _port, Address = _address.Trim(), Prefix = _prefix,
+            // An empty box keeps a token stored before; choosing no name removes it.
+            DuckDnsName = _useDuck ? _duckName.Trim() : "", DuckDnsToken = !_useDuck ? "" : _duckToken.Trim() is { Length: > 0 } typed ? typed : null,
+        });
+        if (Issues.Count == 0) { _duckToken = ""; await LoadStatusAsync(); }
+        _busy = false;
+    }
+
+    private async Task SwitchOffAsync()
+    {
+        _busy = true;
+        Issues = await State.SetVpnAsync(new VpnRequest { Enabled = false, Port = Vpn.Port, Address = Vpn.Address, Prefix = Vpn.Prefix, DuckDnsName = Vpn.DuckDnsName });
+        _busy = false;
+        if (Issues.Count == 0) (_confirmOff, _added) = (false, null);
+    }
+
+    private async Task AddAsync()
+    {
+        _busy = true;
+        var result = await State.AddVpnDeviceAsync(new VpnDeviceRequest { Name = _newName.Trim(), Access = _newAccess });
+        _addIssues = result.Issues;
+        if (result.Ok)
+        {
+            _added = new Added(result.Device, result.ClientConfig, result.FileName, Qr(result.ClientConfig));
+            _newName = "";
+            await LoadStatusAsync();
+        }
+        _busy = false;
+    }
+
+    private async Task RemoveAsync()
+    {
+        var device = _remove!;
+        _busy = true;
+        Issues = await State.RemoveVpnDeviceAsync(device.Id);
+        if (_added?.Device?.Id == device.Id) _added = null;
+        _remove = null;
+        _busy = false;
+    }
+
+    private static string Qr(string text)
+    {
+        using var data = QRCodeGenerator.GenerateQrCode(text, QRCodeGenerator.ECCLevel.M);
+        return "data:image/png;base64," + Convert.ToBase64String(new PngByteQRCode(data).GetGraphic(8));
+    }
+
+    private static string When(DateTimeOffset time) => time.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+
+    private static string Ago(DateTimeOffset time) => (DateTimeOffset.UtcNow - time) switch
+    {
+        var t when t < TimeSpan.FromMinutes(1) => "just now",
+        var t when t < TimeSpan.FromHours(1) => $"{(int)t.TotalMinutes} min ago",
+        var t when t < TimeSpan.FromDays(1) => $"{(int)t.TotalHours} h ago",
+        _ => time.ToLocalTime().ToString("d MMM", CultureInfo.InvariantCulture),
+    };
+
+    public override void Dispose()
+    {
+        _stop.Cancel();
+        _stop.Dispose();
+        base.Dispose();
+    }
+}

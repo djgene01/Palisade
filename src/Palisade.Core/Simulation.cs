@@ -40,6 +40,30 @@ public sealed class SimulatedPlatform : ISystemPlatform
     // The demo's own devices all come in through leases, so there is nothing extra to hear about.
     public Task<IReadOnlyList<string>> GetNeighboursAsync(FirewallConfig live, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
 
+    // The demo's line is a fibre box with a public address, so the VPN can be tried end to end.
+    private const string DemoPublicAddress = "41.193.12.57";
+    private readonly string _serverKey = DemoKey();
+    private ReachabilityReport? _reach;
+
+    private static string DemoKey() => Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+
+    public Task<ReachabilityReport> CheckReachabilityAsync(FirewallConfig live, CancellationToken ct) =>
+        Task.FromResult(_reach = VpnPlan.Check(DemoPublicAddress, DemoPublicAddress, DateTimeOffset.UtcNow));
+
+    public Task<(string Private, string Public)> NewVpnKeysAsync(CancellationToken ct) => Task.FromResult((DemoKey(), DemoKey()));
+
+    public Task<string> GetVpnServerKeyAsync(CancellationToken ct) => Task.FromResult(_serverKey);
+
+    public Task<VpnStatus> GetVpnStatusAsync(FirewallConfig live, CancellationToken ct) => Task.FromResult(new VpnStatus
+    {
+        Reachability = _reach ?? VpnPlan.Check(DemoPublicAddress, DemoPublicAddress, DateTimeOffset.UtcNow),
+        // A device added in the demo "connects" from mobile data half a minute later.
+        Peers = [.. live.Vpn.Devices.Where(d => DateTimeOffset.UtcNow - d.CreatedAt > TimeSpan.FromSeconds(30)).Select(d => new VpnPeerStatus
+        {
+            DeviceId = d.Id, LastHandshake = DateTimeOffset.UtcNow.AddSeconds(-40), ReceivedBytes = 3_400_000, SentBytes = 41_000_000,
+        })],
+    });
+
     private static bool StrangerWaiting(FirewallConfig c) =>
         c.ZeroTrust.Enabled && c.ZeroTrust.Approved.All(d => d.Mac != StrangerMac) && c.ZeroTrust.Blocked.All(d => d.Mac != StrangerMac);
 

@@ -63,6 +63,18 @@ public sealed class ShellOptions
 
     /// <summary>Where the capture of waiting devices' packets can be downloaded, or null where it can't (the demo, the app).</summary>
     public string? CaptureDownloadUrl { get; init; }
+
+    /// <summary>
+    /// Hands a file to another app, such as a VPN device's settings to the WireGuard app, where a page can't simply
+    /// download it: the phone app's share sheet. Null on the web page, which offers a download instead.
+    /// </summary>
+    public Func<string, string, Task>? ShareFile { get; init; }
+
+    /// <summary>The button for <see cref="ShareFile"/>, such as "Share settings file" on a phone or "Save settings file" on a computer.</summary>
+    public string ShareFileLabel { get; init; } = "Share settings file";
+
+    /// <summary>What to do after <see cref="ShareFile"/>, in a sentence, for the steps on the VPN page.</summary>
+    public string ShareFileHint { get; init; } = "";
 }
 
 public sealed record ShellLink(string Href, string Label, string Icon);
