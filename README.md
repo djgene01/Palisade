@@ -33,6 +33,7 @@
 - [The companion app](#the-companion-app)
 - [Zero Trust Mode](#zero-trust-mode)
 - [Device names](#device-names)
+- [Speed test](#speed-test)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
 - [Uninstalling](#uninstalling)
@@ -71,6 +72,7 @@
 - **Where to?** briefly records which sites one device connects to.
 - Pause a device, or give it off times such as school nights.
 - **System**: the firewall machine's processor, memory and disk use right now, and over the last hour, day, week or month.
+- **Speed test**: download, upload and ping measured with Speedtest by Ookla, every 30 minutes or by hand, with a month of history.
 - **Zero Trust Mode**: a new device gets nothing until you approve it, on the page or in the app. Until then it waits in a holding zone, and what it tries is recorded.
 
 **Looks after itself**
@@ -360,6 +362,28 @@ How names behave:
 
 ---
 
+## Speed test
+
+The **Speed test** page measures your internet connection from the firewall itself, using **Speedtest by Ookla**, the service behind speedtest.net. It shows:
+- download, upload, ping and jitter
+- the test server
+- a link to each result on speedtest.net
+- a day, week and month of history
+
+The Overview shows the last result too.
+
+**Switching it on.**
+1. On the **Speed test** page, accept Ookla's licence, terms of use and privacy policy. Ookla allows personal, non-commercial use, and Palisade never accepts the terms for you.
+2. The first test downloads Ookla's speed test program (about 1 MB) from Ookla. It isn't part of Palisade, because Ookla doesn't allow that. The firewall checks the download is exactly the expected file, version 1.2.0, before running it, and re-checks the program before each start.
+
+**Automatic tests** run every 30 minutes by default; choose every hour, 3 hours or 6 hours, or switch them off and test only by hand. A scheduled test is put off while your household is using the internet, and tried again every 5 minutes until it is quiet. That way it never interrupts a call or a film.
+
+> **Each test uses data.** It runs at full speed for about 15 seconds each way: roughly 100 MB on a 50 Mbit/s line, and 1–2 GB on a gigabit one. Every 30 minutes, that adds up to several GB a day. The page shows what the last day of tests used. On a capped plan, test less often or only by hand.
+
+Palisade keeps the results for 31 days. It doesn't keep the public address or hardware details Ookla also reports.
+
+---
+
 ## Updating
 
 **From the web page.** Go to **Advanced → Palisade updates**. Press **Check now**, then **Install** when a new release is shown. Or switch on **Install new releases automatically**: the firewall then checks this repository's releases every night at about 3 o'clock and installs a new one by itself. Installing restarts Palisade for a few seconds. Your devices stay online and your settings are kept.
@@ -471,6 +495,7 @@ Every change follows the same path:
 | `/etc/sysctl.d/90-palisade.conf` | Turns on packet forwarding |
 | `/etc/palisade/names/` | Device names under home.arpa, read by the name server |
 | `/var/lib/palisade/names.json`, `/var/lib/palisade/hostnames/` | Which name each device has, and what each device calls itself |
+| `/var/lib/palisade/speed.json`, `/var/lib/palisade/speedtest/` | Speed test settings and results, and Ookla's program once fetched |
 | `/etc/palisade/zt-hosts` | Zero Trust Mode: the approved and blocked devices, for DHCP |
 | `/var/lib/palisade/capture/` | Zero Trust Mode: packets from waiting devices (root only, deleted when the mode is switched off) |
 

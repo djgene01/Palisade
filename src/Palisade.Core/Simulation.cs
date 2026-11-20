@@ -224,6 +224,80 @@ public sealed class SimulatedHealth : ISystemHealth
     }
 }
 
+/// <summary>
+/// Stands in for Speedtest by Ookla in the demo: a month of made-up results every half hour, slower in the busy
+/// evenings, with the terms already accepted. A test asked for takes a few seconds.
+/// </summary>
+public sealed class SimulatedSpeedTest : ISpeedTest
+{
+    private readonly Lock _gate = new();
+    private readonly Random _random = new(11);
+    private readonly SpeedSettings _settings = new() { Enabled = true, TermsAcceptedAt = DateTimeOffset.UtcNow.AddDays(-31) };
+    private readonly List<SpeedResult> _history = [];
+    private DateTimeOffset? _runningSince;
+
+    public SimulatedSpeedTest()
+    {
+        var now = DateTimeOffset.UtcNow;
+        for (var at = now - SpeedPlan.Kept + TimeSpan.FromMinutes(5); at < now; at += TimeSpan.FromMinutes(30))
+            if (_random.Next(12) != 0) _history.Insert(0, Result(at, SpeedPlan.Scheduled));   // some put off: the house was busy
+    }
+
+    private SpeedResult Result(DateTimeOffset at, string trigger)
+    {
+        var hour = at.ToLocalTime().TimeOfDay.TotalHours;
+        var evening = Math.Exp(-Math.Pow((hour - 20.5) / 2.2, 2));
+        var down = (48 - 14 * evening + _random.NextDouble() * 6) * 1e6;
+        var up = (88 - 6 * evening + _random.NextDouble() * 8) * 1e6;
+        return new SpeedResult
+        {
+            At = at, Trigger = trigger, DownloadBps = down, UploadBps = up,
+            PingMs = Math.Round(19 + 9 * evening + _random.NextDouble() * 3, 1), JitterMs = Math.Round(1.5 + _random.NextDouble() * 4, 1),
+            PacketLoss = 0, Server = "Demo Fibre, Johannesburg", Isp = "Demo Internet", DataBytes = (long)((down + up) / 8 * 7),
+        };
+    }
+
+    public Task<SpeedStatus> GetSpeedAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (_runningSince is { } since && DateTimeOffset.UtcNow - since > TimeSpan.FromSeconds(6))
+            {
+                _history.Insert(0, Result(DateTimeOffset.UtcNow, SpeedPlan.Manual));
+                _runningSince = null;
+            }
+            return Task.FromResult(Status());
+        }
+    }
+
+    public Task<SpeedStatus> SetSpeedAsync(SpeedSettingsRequest request, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (SpeedPlan.Validate(request, _settings) is { } problem) return Task.FromResult(Status(problem));
+            (_settings.Enabled, _settings.IntervalMinutes) = (request.Enabled, request.IntervalMinutes);
+            return Task.FromResult(Status());
+        }
+    }
+
+    public Task<SpeedStatus> RunSpeedTestAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            _runningSince ??= DateTimeOffset.UtcNow;
+            return Task.FromResult(Status());
+        }
+    }
+
+    private SpeedStatus Status(string problem = "") => new()
+    {
+        Settings = new SpeedSettings { Enabled = _settings.Enabled, IntervalMinutes = _settings.IntervalMinutes, TermsAcceptedAt = _settings.TermsAcceptedAt },
+        Installed = true, Running = _runningSince is not null, Problem = problem,
+        NextAt = _settings.Enabled ? (_history.FirstOrDefault()?.At ?? DateTimeOffset.UtcNow) + TimeSpan.FromMinutes(_settings.IntervalMinutes) : null,
+        History = SpeedPlan.ForWire(_history),
+    };
+}
+
 /// <summary>Stands in for a real watch in the demo, with a made-up list after a short wait.</summary>
 public sealed class SimulatedWatch : ITrafficWatch, IDnsControl
 {
