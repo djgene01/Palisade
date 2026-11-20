@@ -66,6 +66,13 @@
                 <div><dt class="text-sm text-muted">Going out</dt><dd class="whitespace-nowrap text-lg font-bold">@Fmt.Rate(_upRate)</dd></div>
             </div>
         </dl>
+        @if (_speed?.History.FirstOrDefault(r => r.Problem.Length == 0) is { } tested)
+        {
+            <p class="mt-3 text-sm text-muted">
+                <a href="/speed" class="font-semibold text-ink underline-offset-4 hover:underline">Last speed test</a>:
+                @SpeedPlan.Format(tested.DownloadBps) down, @SpeedPlan.Format(tested.UploadBps) up, @tested.PingMs.ToString("0", System.Globalization.CultureInfo.InvariantCulture) ms
+            </p>
+        }
     </div>
 
     <div class="card @(protectedNow ? "card-ok" : "") flex flex-col items-center justify-center text-center">
@@ -288,6 +295,8 @@
 
 @code {
     [Inject] private ITrafficWatch Watcher { get; set; } = default!;
+    [Inject] private ISpeedTest Speed { get; set; } = default!;
+    private SpeedStatus? _speed;
 
     private string? _watchFor;
     private string _watchName = "";
@@ -337,6 +346,18 @@
     {
         base.OnInitialized();
         _ = PollAsync(_cts.Token);
+        _ = LoadSpeedAsync();
+    }
+
+    // The last speed test on the internet card. Without one, or on a firewall too old to test, the line is left out.
+    private async Task LoadSpeedAsync()
+    {
+        try
+        {
+            _speed = await Speed.GetSpeedAsync(_cts.Token);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception) { }
     }
 
     private async Task PollAsync(CancellationToken ct)

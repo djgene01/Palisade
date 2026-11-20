@@ -5,7 +5,7 @@ using Palisade.Core;
 namespace Palisade.Web.Services;
 
 /// <summary>Talks to the root agent over its Unix socket. This is the web UI's only route to the system.</summary>
-public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IHeldCapture, ISystemHealth, IDisposable
+public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IHeldCapture, ISystemHealth, ISpeedTest, IDisposable
 {
     public async Task<ApplyResult> FlushDnsAsync(CancellationToken ct = default)
     {
@@ -98,6 +98,23 @@ public sealed class AgentClient : IFirewallBackend, IUpdates, ITrafficWatch, IDn
         using var response = await _http.PostAsJsonAsync("approvals", change, PalisadeJson.Options, ct);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<ApplyResult>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<SpeedStatus> GetSpeedAsync(CancellationToken ct = default) =>
+        (await _http.GetFromJsonAsync<SpeedStatus>("speed", PalisadeJson.Options, ct))!;
+
+    public async Task<SpeedStatus> SetSpeedAsync(SpeedSettingsRequest request, CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsJsonAsync("speed/settings", request, PalisadeJson.Options, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SpeedStatus>(PalisadeJson.Options, ct))!;
+    }
+
+    public async Task<SpeedStatus> RunSpeedTestAsync(CancellationToken ct = default)
+    {
+        using var response = await _http.PostAsync("speed/run", null, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SpeedStatus>(PalisadeJson.Options, ct))!;
     }
 
     public async Task<HealthReport> GetHealthAsync(HealthRange range, CancellationToken ct = default) =>

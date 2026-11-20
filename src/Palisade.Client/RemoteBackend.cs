@@ -8,7 +8,7 @@ namespace Palisade.Client;
 /// the web interface's agent client offers them, so every page works unchanged; only the road differs.
 /// Failures come back as <see cref="FirewallException"/> in words the pages can show as they are.
 /// </summary>
-public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, ISystemHealth, IDisposable
+public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, ISystemHealth, ISpeedTest, IDisposable
 {
     // Short for reads and saves, so a firewall out of reach is reported quickly. The agent itself allows a
     // change up to a minute; installing an update can download for minutes on a slow line.
@@ -39,6 +39,18 @@ public sealed class RemoteBackend : IFirewallBackend, IUpdates, ITrafficWatch, I
     // A firewall from before Zero Trust Mode does not know these two calls; it is told to update.
     public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => NewerAsync(PostAsync<ApplyResult>("zerotrust", request, Change, ct));
     public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => NewerAsync(PostAsync<ApplyResult>("approvals", change, Change, ct));
+
+    private const string SpeedTooOld = "This firewall is too old to test the internet speed. Update it from its Advanced page.";
+
+    public Task<SpeedStatus> GetSpeedAsync(CancellationToken ct = default) => SpeedAsync(GetAsync<SpeedStatus>("speed", ct));
+    public Task<SpeedStatus> SetSpeedAsync(SpeedSettingsRequest request, CancellationToken ct = default) => SpeedAsync(PostAsync<SpeedStatus>("speed/settings", request, Normal, ct));
+    public Task<SpeedStatus> RunSpeedTestAsync(CancellationToken ct = default) => SpeedAsync(PostAsync<SpeedStatus>("speed/run", null, Normal, ct));
+
+    private static async Task<SpeedStatus> SpeedAsync(Task<SpeedStatus> call)
+    {
+        try { return await call; }
+        catch (FirewallException ex) when (ex.Message.Contains("(404", StringComparison.Ordinal)) { return new SpeedStatus { Problem = SpeedTooOld }; }
+    }
 
     public async Task<HealthReport> GetHealthAsync(HealthRange range, CancellationToken ct = default)
     {

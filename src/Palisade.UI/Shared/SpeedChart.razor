@@ -1,0 +1,108 @@
+@using System.Globalization
+@using System.Text
+@* Download and upload over a day, a week or a month, placed by time: tests that were put off or failed show as breaks. *@
+@{
+    var to = DateTimeOffset.UtcNow;
+    var from = to - TimeSpan.FromDays(Days);
+    var points = Points(from);
+    var max = Scale(points.Count == 0 ? 1 : points.Max(p => Math.Max(p.Down, p.Up)));
+}
+<section class="panel mt-4 min-w-0 p-5" aria-label="Speed history">
+    <div class="flex gap-2">
+        <div aria-hidden="true" class="flex flex-col justify-between text-right text-xs text-muted"><span>@Label(max)</span><span>@Label(max / 2)</span><span>0</span></div>
+        <svg viewBox="0 0 @Width @Height" class="h-48 min-w-0 flex-1" role="img" preserveAspectRatio="none"
+             aria-label="@($"Download and upload over the last {(Days == 1 ? "day" : Days == 7 ? "week" : "month")}. Download averaged {Average(points, p => p.Down)}, upload {Average(points, p => p.Up)}.")">
+            @foreach (var y in new[] { 1.0, Height / 2.0, Height - 1.0 })
+            {
+                <line x1="0" y1="@F(y)" x2="@Width" y2="@F(y)" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke" />
+            }
+            @foreach (var line in Lines(points, p => p.Up, from, to, max))
+            {
+                <polyline fill="none" stroke="var(--up)" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="@line" />
+            }
+            @foreach (var line in Lines(points, p => p.Down, from, to, max))
+            {
+                <polyline fill="none" stroke="var(--down)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="@line" />
+            }
+        </svg>
+    </div>
+    <div aria-hidden="true" class="mt-1 flex justify-between pl-12 text-xs text-muted">
+        <span>@Axis(from)</span><span>@Axis(from + (to - from) / 2)</span><span>Now</span>
+    </div>
+    <p class="mt-2 flex flex-wrap gap-x-5 text-xs text-muted">
+        <span><span class="mr-1.5 inline-block h-0.5 w-4 bg-down align-middle"></span>Download</span>
+        <span><span class="mr-1.5 inline-block w-4 border-t-2 border-dashed border-up align-middle"></span>Upload</span>
+    </p>
+</section>
+
+@code {
+    private const int Width = 600, Height = 160;
+
+    [Parameter, EditorRequired] public List<SpeedResult> History { get; set; } = [];
+    [Parameter] public int Days { get; set; } = 1;
+    /// <summary>Minutes between automatic tests: a longer wait than about two of them is shown as a break.</summary>
+    [Parameter] public int Interval { get; set; } = SpeedPlan.DefaultInterval;
+
+    private sealed record Point(DateTimeOffset At, double Down, double Up);
+
+    /// <summary>Each test as it is for a day; for a week averaged per 2 hours, for a month per 6, so the line stays readable.</summary>
+    private List<Point> Points(DateTimeOffset from)
+    {
+        var tests = History.Where(r => r.Problem.Length == 0 && r.At >= from).OrderBy(r => r.At).ToList();
+        if (Days == 1) return [.. tests.Select(r => new Point(r.At, r.DownloadBps, r.UploadBps))];
+        var hours = Days == 7 ? 2 : 6;
+        return [.. tests.GroupBy(r => r.At.ToUnixTimeSeconds() / (hours * 3600))
+            .Select(g => new Point(DateTimeOffset.FromUnixTimeSeconds(g.Key * hours * 3600 + hours * 1800), g.Average(r => r.DownloadBps), g.Average(r => r.UploadBps)))];
+    }
+
+    private IEnumerable<string> Lines(List<Point> points, Func<Point, double> pick, DateTimeOffset from, DateTimeOffset to, double max)
+    {
+        var gap = TimeSpan.FromMinutes(Math.Max(Interval, Days == 1 ? 0 : Days == 7 ? 120 : 360) * 2.5);
+        var span = (to - from).TotalSeconds;
+        var line = new StringBuilder();
+        DateTimeOffset? last = null;
+        foreach (var p in points)
+        {
+            if (last is { } previous && p.At - previous > gap && line.Length > 0)
+            {
+                yield return Finish(line);
+                line.Clear();
+            }
+            var x = Math.Clamp((p.At - from).TotalSeconds / span * Width, 0, Width);
+            var y = Height - 1 - Math.Clamp(pick(p) / max, 0, 1) * (Height - 2);
+            line.Append(F(x)).Append(',').Append(F(y)).Append(' ');
+            last = p.At;
+        }
+        if (line.Length > 0) yield return Finish(line);
+    }
+
+    // A lone test between two breaks is drawn as a short stroke, so it doesn't vanish.
+    private static string Finish(StringBuilder line)
+    {
+        var text = line.ToString().Trim();
+        if (text.Contains(' ')) return text;
+        var parts = text.Split(',');
+        var x = double.Parse(parts[0], CultureInfo.InvariantCulture);
+        return $"{F(Math.Max(0, x - 2))},{parts[1]} {F(Math.Min(Width, x + 2))},{parts[1]}";
+    }
+
+    /// <summary>A round top for the scale: 10, 20, 50, 100, 200, 500 Mbit/s and so on.</summary>
+    private static double Scale(double bps)
+    {
+        foreach (var step in new[] { 10e6, 20e6, 50e6, 100e6, 200e6, 500e6, 1e9, 2e9, 5e9, 10e9 })
+            if (bps <= step) return step;
+        return Math.Ceiling(bps / 10e9) * 10e9;
+    }
+
+    private static string Label(double bps) => bps >= 1e9 ? $"{(bps / 1e9).ToString("0.#", CultureInfo.InvariantCulture)} G" : $"{(bps / 1e6).ToString("0", CultureInfo.InvariantCulture)} M";
+
+    private static string Average(List<Point> points, Func<Point, double> pick) => points.Count == 0 ? "nothing" : SpeedPlan.Format(points.Average(pick));
+
+    private string Axis(DateTimeOffset time)
+    {
+        var local = time.ToLocalTime();
+        return Days == 1 ? local.ToString("HH:mm", CultureInfo.InvariantCulture) : local.ToString("d MMM", CultureInfo.InvariantCulture);
+    }
+
+    private static string F(double v) => v.ToString("0.#", CultureInfo.InvariantCulture);
+}

@@ -188,6 +188,11 @@ public sealed class RemoteTests : IDisposable
         Assert.Empty(health.Problem);
         Assert.NotNull(health.Now);
         Assert.NotEmpty(health.Points);
+        var speed = await backend.GetSpeedAsync();
+        Assert.Empty(speed.Problem);
+        Assert.NotNull(speed.Last);
+        Assert.True((await backend.RunSpeedTestAsync()).Running);
+        Assert.Equal(60, (await backend.SetSpeedAsync(new SpeedSettingsRequest { Enabled = true, IntervalMinutes = 60 })).Settings.IntervalMinutes);
         Assert.True((await backend.SetNamesAsync([new DeviceName { Mac = "52:54:00:aa:00:01", Name = "Gran's tablet" }])).Ok);
         Assert.Equal("Gran's tablet", Assert.Single((await backend.GetConfigAsync()).Names).Name);
         Assert.True((await backend.SetAccessAsync([])).Ok);

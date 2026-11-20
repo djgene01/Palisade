@@ -1,0 +1,250 @@
+@page "/speed"
+@inherits StatePage
+@using System.Globalization
+@inject ISpeedTest Speed
+
+<PageTitle>Speed test · Palisade</PageTitle>
+
+<h1 class="text-3xl font-extrabold md:text-4xl" tabindex="-1">Speed test</h1>
+<p class="mt-2 max-w-2xl text-lg text-muted">How fast your internet connection really is, measured by the firewall itself with Speedtest by Ookla.</p>
+
+@if (_status is null)
+{
+    <p class="mt-6 text-muted" role="status">@(_error ?? "Asking the firewall for its speed tests.")</p>
+}
+else if (_status.Problem.Length > 0 && _status.Settings.TermsAcceptedAt is null && _status.History.Count == 0 && _status.Problem.Contains("too old", StringComparison.Ordinal))
+{
+    <p class="panel mt-6 max-w-2xl p-4" role="status">@_status.Problem</p>
+}
+else if (_status.Settings.TermsAcceptedAt is null)
+{
+    @* Before the first test: what it does, what it costs, and Ookla's terms, which only the owner can accept. *@
+    <section class="panel mt-6 max-w-2xl p-5" aria-labelledby="start-title">
+        <h2 id="start-title" class="text-xl font-bold">Test your internet speed</h2>
+        <ul class="mt-3 list-disc space-y-2 pl-5">
+            <li>The firewall measures download, upload and ping with <strong>Speedtest by Ookla</strong>, the service behind speedtest.net, so the numbers match what your provider sees.</li>
+            <li>Automatic tests run every 30 minutes, or less often if you choose. A test is put off while your household is using the internet, so it never interrupts a call or a film.</li>
+            <li><strong>Each test uses data:</strong> about 15 seconds at full speed each way, which is roughly 100 MB on a 50 Mbit/s line and 1–2 GB on a gigabit one. On a capped plan, test less often or only by hand.</li>
+            <li>The first test downloads Ookla's speed test program (about 1 MB) from Ookla onto the firewall.</li>
+        </ul>
+        <label class="mt-4 flex items-start gap-3">
+            <input type="checkbox" class="mt-1 h-5 w-5" @bind="_accept" />
+            <span>I accept Ookla's <a class="font-semibold underline" href="@SpeedPlan.EulaUrl" target="_blank" rel="noopener">licence</a>, <a class="font-semibold underline" href="@SpeedPlan.TermsUrl" target="_blank" rel="noopener">terms of use</a> and <a class="font-semibold underline" href="@SpeedPlan.PrivacyUrl" target="_blank" rel="noopener">privacy policy</a>. Ookla allows personal, non-commercial use.</span>
+        </label>
+        @if (_message is { } message) { <p class="mt-3 text-danger" role="alert">@message</p> }
+        <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" class="btn btn-primary" disabled="@(!_accept || _busy)" @onclick="() => StartAsync(automatic: true)"><Icon Name="play" />Test now and every 30 minutes</button>
+            <button type="button" class="btn" disabled="@(!_accept || _busy)" @onclick="() => StartAsync(automatic: false)">Only test now</button>
+        </div>
+    </section>
+}
+else
+{
+    var last = _status.Last;
+    var good = _status.History.FirstOrDefault(r => r.Problem.Length == 0);
+    <div class="mt-6 flex flex-wrap items-center gap-3">
+        <button type="button" class="btn btn-primary" disabled="@(_status.Running || _busy)" @onclick="RunAsync"><Icon Name="@(_status.Running ? "refresh" : "play")" />@(_status.Running ? "Testing" : "Run a test now")</button>
+        <span class="text-muted" role="status">
+            @if (_status.Running) { <span>Testing download, then upload. This takes about 30 seconds@(_status.Installed ? "" : ", plus a moment to fetch Ookla's program the first time").</span> }
+            else if (last is not null) { <span>Last tested @When(last.At)@(last.Trigger == SpeedPlan.Manual ? " (by hand)" : "").</span> }
+        </span>
+    </div>
+    @if (_message is { } message) { <p class="mt-3 text-danger" role="alert">@message</p> }
+    @if (last is { Problem.Length: > 0 })
+    {
+        <p class="panel mt-4 max-w-2xl border-warn p-4" role="alert">@last.Problem</p>
+    }
+
+    @if (good is not null)
+    {
+        <section aria-label="Latest result" class="mt-4 grid gap-4 sm:grid-cols-3">
+            <div class="panel p-5">
+                <h2 class="flex items-center gap-2 font-bold"><Icon Name="down" Class="text-down" />Download</h2>
+                <p class="mt-2 text-4xl font-extrabold tabular-nums">@Mbit(good.DownloadBps)<span class="text-xl"> Mbit/s</span></p>
+            </div>
+            <div class="panel p-5">
+                <h2 class="flex items-center gap-2 font-bold"><Icon Name="up" Class="text-up" />Upload</h2>
+                <p class="mt-2 text-4xl font-extrabold tabular-nums">@Mbit(good.UploadBps)<span class="text-xl"> Mbit/s</span></p>
+            </div>
+            <div class="panel p-5">
+                <h2 class="flex items-center gap-2 font-bold"><Icon Name="clock" Class="text-brand" />Ping</h2>
+                <p class="mt-2 text-4xl font-extrabold tabular-nums">@good.PingMs.ToString("0", CultureInfo.InvariantCulture)<span class="text-xl"> ms</span></p>
+                <p class="mt-1 text-sm text-muted">Jitter @good.JitterMs.ToString("0.#", CultureInfo.InvariantCulture) ms@(good.PacketLoss is { } loss ? $" · {loss.ToString("0.##", CultureInfo.InvariantCulture)}% lost" : "")</p>
+            </div>
+        </section>
+        <p class="mt-2 text-sm text-muted">
+            @When(good.At)@(good.Server.Length > 0 ? $" · {good.Server}" : "")@(good.Isp.Length > 0 ? $" · {good.Isp}" : "") · used @Fmt.Bytes(good.DataBytes)
+            @if (good.ResultUrl.Length > 0) { <span> · <a class="font-semibold underline" href="@good.ResultUrl" target="_blank" rel="noopener">See it on speedtest.net</a></span> }
+        </p>
+    }
+
+    <section aria-labelledby="schedule-title" class="panel mt-6 max-w-2xl p-5">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <h2 id="schedule-title" class="font-bold">Automatic tests</h2>
+                <p class="text-sm text-muted">
+                    @if (_status.Settings.Enabled && _status.NextAt is { } next) { <span>Next one at about @When(next).</span> }
+                    else { <span>Off. Tests run only when you ask.</span> }
+                </p>
+            </div>
+            <Toggle Value="_status.Settings.Enabled" ValueChanged="v => SaveAsync(v, _status.Settings.IntervalMinutes)" Label="Automatic tests" Disabled="_busy" />
+        </div>
+        @if (_status.Settings.Enabled)
+        {
+            <label for="interval" class="field-label mt-4">How often</label>
+            <select id="interval" class="input max-w-xs" value="@_status.Settings.IntervalMinutes" @onchange="ChooseIntervalAsync" disabled="@_busy">
+                @foreach (var minutes in SpeedPlan.Intervals)
+                {
+                    <option value="@minutes">@IntervalWords(minutes)</option>
+                }
+            </select>
+            @if (_status.Postponed.Length > 0) { <p class="mt-3 text-sm text-muted">@_status.Postponed</p> }
+            <p class="mt-3 text-sm text-muted">
+                The last day of tests used @Fmt.Bytes(_status.History.Where(r => DateTimeOffset.UtcNow - r.At < TimeSpan.FromDays(1)).Sum(r => r.DataBytes)) of data.
+            </p>
+        }
+    </section>
+
+    @if (_status.History.Count(r => r.Problem.Length == 0) >= 2)
+    {
+        <div class="mt-8 flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-xl font-bold">History</h2>
+            <div role="group" aria-label="How far back" class="inline-flex rounded-lg border border-line p-1">
+                @foreach (var (days, label) in Ranges)
+                {
+                    <button type="button" aria-pressed="@(days == _days ? "true" : "false")"
+                            class="@($"rounded-md px-3 py-1.5 text-sm font-semibold {(days == _days ? "bg-brand text-on-brand" : "text-muted hover:text-ink")}")"
+                            @onclick="() => _days = days">@label</button>
+                }
+            </div>
+        </div>
+        <SpeedChart History="_status.History" Days="_days" Interval="_status.Settings.IntervalMinutes" />
+
+        <div class="panel mt-4 overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="text-muted"><tr><th class="px-4 py-2 font-semibold">When</th><th class="px-4 py-2 text-right font-semibold">Download</th><th class="px-4 py-2 text-right font-semibold">Upload</th><th class="px-4 py-2 text-right font-semibold">Ping</th><th class="px-4 py-2 font-semibold"></th></tr></thead>
+                <tbody>
+                    @foreach (var r in _status.History.Take(10))
+                    {
+                        <tr class="border-t border-line">
+                            <td class="px-4 py-2 whitespace-nowrap">@When(r.At)</td>
+                            @if (r.Problem.Length > 0)
+                            {
+                                <td class="px-4 py-2 text-warn" colspan="3">Failed</td>
+                            }
+                            else
+                            {
+                                <td class="px-4 py-2 text-right tabular-nums">@Mbit(r.DownloadBps)</td>
+                                <td class="px-4 py-2 text-right tabular-nums">@Mbit(r.UploadBps)</td>
+                                <td class="px-4 py-2 text-right tabular-nums">@r.PingMs.ToString("0", CultureInfo.InvariantCulture) ms</td>
+                            }
+                            <td class="px-4 py-2 text-muted">@(r.Trigger == SpeedPlan.Manual ? "by hand" : "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private static readonly (int Days, string Label)[] Ranges = [(1, "Day"), (7, "Week"), (31, "Month")];
+    private SpeedStatus? _status;
+    private string? _error, _message;
+    private bool _accept, _busy;
+    private int _days = 1;
+    private readonly CancellationTokenSource _stop = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _ = RefreshAsync(_stop.Token);
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _status = await Speed.GetSpeedAsync(_stop.Token);
+            _error = null;
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+        catch (Exception ex) { _error = Palisade.Core.Problem.Explain(ex, "The firewall did not answer about speed tests."); }
+    }
+
+    // Every 3 seconds while a test runs, so the result shows as soon as it is in; otherwise every 30.
+    private async Task RefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Ticks every 3 seconds, so a test started by the button is followed at once, but only asks the firewall
+            // that often while one runs.
+            var asked = DateTimeOffset.UtcNow;
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), ct);
+                if (_status?.Running != true && DateTimeOffset.UtcNow - asked < TimeSpan.FromSeconds(30)) continue;
+                asked = DateTimeOffset.UtcNow;
+                await LoadAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task StartAsync(bool automatic)
+    {
+        _busy = true;
+        await ApplyAsync(Speed.SetSpeedAsync(new SpeedSettingsRequest { Enabled = automatic, IntervalMinutes = SpeedPlan.DefaultInterval, AcceptTerms = true }, _stop.Token));
+        if (_message is null) await ApplyAsync(Speed.RunSpeedTestAsync(_stop.Token));
+        _busy = false;
+    }
+
+    private async Task RunAsync()
+    {
+        _busy = true;
+        await ApplyAsync(Speed.RunSpeedTestAsync(_stop.Token));
+        _busy = false;
+    }
+
+    private async Task SaveAsync(bool enabled, int minutes)
+    {
+        _busy = true;
+        await ApplyAsync(Speed.SetSpeedAsync(new SpeedSettingsRequest { Enabled = enabled, IntervalMinutes = minutes }, _stop.Token));
+        _busy = false;
+    }
+
+    private Task ChooseIntervalAsync(ChangeEventArgs e) =>
+        SaveAsync(true, int.TryParse(e.Value?.ToString(), CultureInfo.InvariantCulture, out var minutes) ? minutes : SpeedPlan.DefaultInterval);
+
+    private async Task ApplyAsync(Task<SpeedStatus> call)
+    {
+        try
+        {
+            var status = await call;
+            _message = status.Problem.Length > 0 ? status.Problem : null;
+            _status = status;
+        }
+        catch (Exception ex) { _message = Palisade.Core.Problem.Explain(ex, "The firewall did not answer."); }
+    }
+
+    private static string Mbit(double bps) => (bps / 1e6).ToString(bps >= 100e6 ? "0" : "0.0", CultureInfo.InvariantCulture);
+
+    private static string IntervalWords(int minutes) => minutes switch
+    {
+        30 => "Every 30 minutes", 60 => "Every hour", _ => $"Every {minutes / 60} hours",
+    };
+
+    private static string When(DateTimeOffset time)
+    {
+        var local = time.ToLocalTime();
+        return local.Date == DateTime.Today ? local.ToString("HH:mm", CultureInfo.InvariantCulture) : local.ToString("d MMM HH:mm", CultureInfo.InvariantCulture);
+    }
+
+    public override void Dispose()
+    {
+        _stop.Cancel();
+        _stop.Dispose();
+        base.Dispose();
+    }
+}

@@ -70,6 +70,7 @@ if (backendKind == "simulated")
         new FirewallEngine(new SimulatedPlatform(), Path.Combine(dataDirectory, "simulated"), TimeSpan.FromSeconds(PalisadeDefaults.ConfirmSeconds)));
     builder.Services.AddSingleton<IUpdates>(new SimulatedUpdates());
     builder.Services.AddSingleton<ISystemHealth>(new SimulatedHealth());
+    builder.Services.AddSingleton<ISpeedTest>(new SimulatedSpeedTest());
     var simulatedWatch = new SimulatedWatch();
     builder.Services.AddSingleton<ITrafficWatch>(simulatedWatch);
     builder.Services.AddSingleton<IDnsControl>(simulatedWatch);
@@ -83,6 +84,7 @@ else
     builder.Services.AddSingleton(sp => (IDnsControl)sp.GetRequiredService<IFirewallBackend>());
     builder.Services.AddSingleton(sp => (IHeldCapture)sp.GetRequiredService<IFirewallBackend>());
     builder.Services.AddSingleton(sp => (ISystemHealth)sp.GetRequiredService<IFirewallBackend>());
+    builder.Services.AddSingleton(sp => (ISpeedTest)sp.GetRequiredService<IFirewallBackend>());
 }
 
 var app = builder.Build();

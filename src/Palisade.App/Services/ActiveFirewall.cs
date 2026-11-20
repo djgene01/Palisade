@@ -9,10 +9,11 @@ namespace Palisade.App.Services;
 /// The shared screens are given this one object for every interface they need; switching firewalls swaps
 /// what is behind it, and the screens then load afresh.
 /// </summary>
-public sealed class ActiveFirewall(FirewallEngine demo) : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IConnectionProbe, IMakerSource, ISystemHealth
+public sealed class ActiveFirewall(FirewallEngine demo) : IFirewallBackend, IUpdates, ITrafficWatch, IDnsControl, IConnectionProbe, IMakerSource, ISystemHealth, ISpeedTest
 {
     private readonly SimulatedUpdates _demoUpdates = new();
     private readonly Lazy<SimulatedHealth> _demoHealth = new(() => new SimulatedHealth());
+    private readonly Lazy<SimulatedSpeedTest> _demoSpeed = new(() => new SimulatedSpeedTest());
     private readonly SimulatedWatch _demoWatch = new();
     private readonly DemoProbe _demoProbe = new();
 
@@ -55,6 +56,7 @@ public sealed class ActiveFirewall(FirewallEngine demo) : IFirewallBackend, IUpd
     }
 
     private IFirewallBackend Backend => IsDemo ? demo : _remote ?? throw NotChosen();
+    private ISpeedTest Speed => IsDemo ? _demoSpeed.Value : _remote ?? throw NotChosen();
     private ISystemHealth Health => IsDemo ? _demoHealth.Value : _remote ?? throw NotChosen();
     private IUpdates Updates => IsDemo ? _demoUpdates : _remote ?? throw NotChosen();
     private ITrafficWatch Watch => IsDemo ? _demoWatch : _remote ?? throw NotChosen();
@@ -76,6 +78,9 @@ public sealed class ActiveFirewall(FirewallEngine demo) : IFirewallBackend, IUpd
     public Task<ApplyResult> SetZeroTrustAsync(ZeroTrustRequest request, CancellationToken ct = default) => Backend.SetZeroTrustAsync(request, ct);
     public Task<ApplyResult> ChangeApprovalAsync(ApprovalChange change, CancellationToken ct = default) => Backend.ChangeApprovalAsync(change, ct);
 
+    public Task<SpeedStatus> GetSpeedAsync(CancellationToken ct = default) => Speed.GetSpeedAsync(ct);
+    public Task<SpeedStatus> SetSpeedAsync(SpeedSettingsRequest request, CancellationToken ct = default) => Speed.SetSpeedAsync(request, ct);
+    public Task<SpeedStatus> RunSpeedTestAsync(CancellationToken ct = default) => Speed.RunSpeedTestAsync(ct);
     public Task<HealthReport> GetHealthAsync(HealthRange range, CancellationToken ct = default) => Health.GetHealthAsync(range, ct);
     public Task<UpdateStatus> GetUpdateAsync(CancellationToken ct = default) => Updates.GetUpdateAsync(ct);
     public Task<UpdateStatus> SetUpdateAsync(UpdateSettings settings, CancellationToken ct = default) => Updates.SetUpdateAsync(settings, ct);
